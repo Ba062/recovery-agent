@@ -68,7 +68,11 @@ def show_progress(kind: str, data: dict) -> None:
 
 
 def save(name: str, record: dict) -> None:
+    """Save the run record, plus its bilingual incident report next to it (one extra API call)."""
+    import report
     OUTPUT.mkdir(exist_ok=True)
+    path = report.save(record, OUTPUT / name)  # first, so the record includes the report's stats
+    print(f"  report: {path.name} (model prose used: {record['report']['prose_used']})")
     (OUTPUT / f"{name}.json").write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
 
 

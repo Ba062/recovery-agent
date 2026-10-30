@@ -22,6 +22,7 @@ agent.TOOL_FUNCS.update(fakes)
 broken_now = []  # what the (fake) monitor reports when the agent claims recovery
 agent.monitor.check_once = lambda gap=3: [NS(rule=r) for r in broken_now]
 agent.fetch_money_impact = lambda: None  # no service in these checks; the money checks below replace this
+agent.fetch_config = lambda: None
 
 USAGE = NS(input_tokens=10, output_tokens=5, cache_read_input_tokens=100, cache_creation_input_tokens=None)
 

@@ -18,6 +18,7 @@ TESTS = Path(__file__).resolve().parent
 ROOT = TESTS.parent
 CHECKS = [
     "check_agent_mock.py",
+    "check_report_mock.py",
     "check_scenarios.py",
     "check_monitor.py",
     "check_serious_fixes.py",

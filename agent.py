@@ -56,6 +56,7 @@ SERVICE_URL = os.getenv("SERVICE_URL", "http://127.0.0.1:8000")
 LOG_FILE = ROOT / "service" / "logs" / "app.jsonl"
 CONFIG_FILE = ROOT / "service" / "config.yaml"
 DEPLOY_LOG = ROOT / "service" / "deploys.jsonl"
+REPLAYS = ROOT / "replays"  # saved runs (record + incident report) for replay mode
 AGENT_NAME = "nabd-agent"
 
 
@@ -390,6 +391,14 @@ def verify_recovery_claim(diagnosis: Diagnosis) -> tuple[Diagnosis, list[str]]:
     return diagnosis, still_broken
 
 
+def fetch_config() -> dict | None:
+    """The config the service is really using (for the report: version / URL before and after)."""
+    try:
+        return requests.get(f"{SERVICE_URL}/config", timeout=5).json()
+    except (requests.RequestException, ValueError):
+        return None
+
+
 def fetch_money_impact() -> dict | None:
     """Money impact computed by the service from the DB. None if the service can't be read."""
     try:
@@ -470,7 +479,8 @@ def run_agent(alert: str,
              "writes_applied": [], "writes_rejected": [], "writes_blocked": []}
     events = []
     record = {"alert": alert, "mode": "recommend" if recommend_only else "act", "model": MODEL,
-              "stats": stats, "events": events}
+              "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+              "config_before": fetch_config(), "stats": stats, "events": events}
     fix_counts: Counter = Counter()
     start = time.time()
     money_before = fetch_money_impact()  # "before" = when Nabd picks up the alert
@@ -485,6 +495,7 @@ def run_agent(alert: str,
     def finish(diagnosis: Diagnosis) -> tuple[Diagnosis, dict]:
         diagnosis = attach_money_impact(diagnosis, money_before, money_peak, fix_applied,
                                         money_recovered, fetch_money_impact())
+        record["config_after"] = fetch_config()
         stats["seconds"] = round(time.time() - start, 1)
         stats["est_cost_usd"] = estimate_cost(stats)
         record["diagnosis"] = diagnosis.model_dump()
@@ -604,3 +615,9 @@ if __name__ == "__main__":
     print("\n=== DIAGNOSIS ===")
     print(diagnosis.model_dump_json(indent=2))
     print("=== STATS ===", json.dumps(run["stats"]))
+    import report  # imported here: report.py imports this module
+    REPLAYS.mkdir(exist_ok=True)
+    stem = REPLAYS / f"{datetime.now():%Y%m%d-%H%M%S}_{run['mode']}"
+    report_path = report.save(run, stem)
+    stem.with_suffix(".json").write_text(json.dumps(run, indent=2, default=str), encoding="utf-8")
+    print(f"=== SAVED === {stem}.json and {report_path.name}")
