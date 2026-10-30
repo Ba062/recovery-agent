@@ -223,3 +223,6 @@ CLAUDE.md
 # Nabd runtime files (database, logs, pid)
 service/data/
 service/logs/
+# live copies made from the *.default files by supervisor.py / chaos.py reset
+service/config.yaml
+service/deploys.jsonl

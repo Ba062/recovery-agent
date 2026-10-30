@@ -4,6 +4,7 @@ Usage:  python supervisor.py start | stop | restart | status
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -17,6 +18,20 @@ PID_FILE = ROOT / "service" / "data" / "service.pid"
 UVICORN_LOG = ROOT / "service" / "logs" / "uvicorn.log"
 SERVICE_URL = os.getenv("SERVICE_URL", "http://127.0.0.1:8000")
 PORT = SERVICE_URL.rsplit(":", 1)[-1]
+
+# The live config and deploy history are git-ignored copies of these committed templates,
+# so chaos experiments can never be committed by accident.
+RUNTIME_FILES = {
+    ROOT / "service" / "config.yaml": ROOT / "service" / "config.default.yaml",
+    ROOT / "service" / "deploys.jsonl": ROOT / "service" / "deploys.default.jsonl",
+}
+
+
+def restore_runtime_files(overwrite: bool) -> None:
+    """Copy the templates to the live files (only missing ones, unless overwrite=True)."""
+    for live, default in RUNTIME_FILES.items():
+        if overwrite or not live.exists():
+            shutil.copyfile(default, live)
 
 
 def running_process() -> psutil.Process | None:
@@ -44,6 +59,7 @@ def wait_until_healthy(seconds: float = 10) -> bool:
 def start() -> str:
     if running_process():
         return "already running"
+    restore_runtime_files(overwrite=False)
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     UVICORN_LOG.parent.mkdir(parents=True, exist_ok=True)
     # uvicorn's output goes to a log file, NOT to our stdout: if the child inherited our stdout,

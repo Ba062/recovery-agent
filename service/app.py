@@ -115,6 +115,18 @@ def reprocess(body: OrderIdsIn):
     return pipeline.reprocess(ids)
 
 
+class ChaosIn(BaseModel):
+    fault: Literal["worker_hang"]
+
+
+@app.post("/admin/chaos")
+def chaos(body: ChaosIn):
+    """Used ONLY by chaos.py to inject in-process faults. Not one of the agent's tools."""
+    pipeline.stuck = True
+    log("DEBUG", "worker", "worker blocked waiting on lock")  # the only (quiet) trace of the hang
+    return {"injected": body.fault}
+
+
 @app.post("/admin/repair-ledger")
 def repair_ledger(body: OrderIdsIn):
     ids = db.mismatched_ledger_order_ids() if body.order_ids == "all_flagged" else body.order_ids
