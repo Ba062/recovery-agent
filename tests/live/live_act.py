@@ -7,6 +7,7 @@ Run from the project root:  python tests/live/live_act.py [scenario ...]
 Starts and resets the service on port 8000, and leaves it stopped.
 """
 
+import json
 import time
 
 import requests
@@ -55,6 +56,18 @@ for scenario in pick_scenarios():
                       before is not None and before["unpaid_orders"]["total_sar"] > 0
                       and after is not None and after["unpaid_orders"]["count"] == 0,
                       f"before {before and before['unpaid_orders']}, after {after and after['unpaid_orders']}")
+        peak, paid = diagnosis.money_impact_peak, diagnosis.money_recovered["orders_paid"]
+        results.check(f"{scenario}: peak taken, and at least as big as at alert (the gap grows until the fix)",
+                      peak is not None and before is not None
+                      and peak["unpaid_orders"]["count"] >= before["unpaid_orders"]["count"],
+                      f"alert {before and before['unpaid_orders']['count']}, peak {peak and peak['unpaid_orders']['count']}")
+        reported_paid = sum(json.loads(e["text"].split(": ", 1)[1])["paid"] for e in record["events"]
+                            if e["kind"] == "tool_result" and e["tool"] == "reprocess_orders" and not e["is_error"])
+        results.check(f"{scenario}: recovered covers everything exposed at the peak, count = reprocess 'paid'",
+                      peak is not None and paid["count"] == reported_paid >= peak["unpaid_orders"]["count"]
+                      and paid["total_sar"] >= peak["unpaid_orders"]["total_sar"] - 0.01,
+                      f"recovered {paid['count']} = {paid['total_sar']} SAR, reprocess paid {reported_paid}, "
+                      f"peak {peak and peak['unpaid_orders']['total_sar']} SAR")
         model_part = diagnosis.impact.split(" [Nabd, computed")[0]  # what the model wrote itself
         made_up = unquoted_amounts(record, model_part)
         results.check(f"{scenario}: every amount the model wrote was quoted from a tool, none estimated",

@@ -106,6 +106,16 @@ check("payment_drop: unpaid value > 0, in both currencies",
       str(m["unpaid_orders"]))
 di = requests.get(f"{URL}/data-integrity", timeout=5).json()
 check("/data-integrity reports the same money as /business-metrics", di["money_impact"] == m)
+unpaid_in_db = expected_from_db()["unpaid_orders"]
+chaos.set_config("payment_provider_url", "internal://payments-v1")
+time.sleep(3)  # hot reload
+r = requests.post(f"{URL}/admin/reprocess", json={"order_ids": "all_unpaid"}, timeout=10).json()
+check("reprocess money_recovered = DB value of the orders that were unpaid", matches(r["money_recovered"], unpaid_in_db)
+      and r["paid"] == unpaid_in_db["count"] > 0,
+      f"recovered {r['money_recovered']['count']} / {r['money_recovered']['total_sar']} SAR, "
+      f"DB had {unpaid_in_db['count']} / {unpaid_in_db['total_sar']:.2f} SAR")
+r = requests.post(f"{URL}/admin/reprocess", json={"order_ids": "all_unpaid"}, timeout=10).json()
+check("second reprocess recovers 0 (nothing double-counted)", r["money_recovered"]["count"] == 0, str(r))
 
 print("\n--- worker_hang")
 run("chaos.py", "reset")
@@ -137,8 +147,15 @@ check("data_corruption: overstatement = 99 x the real SAR amounts (ledger shows 
       f"{over['by_currency']} vs 99 x {sar_orders:.2f}")
 chaos.set_config("version", "v1.3")
 time.sleep(3)
-requests.post(f"{URL}/admin/repair-ledger", json={"order_ids": "all_flagged"}, timeout=10)
+overstated_in_db = expected_from_db()["ledger_overstatement"]
+r = requests.post(f"{URL}/admin/repair-ledger", json={"order_ids": "all_flagged"}, timeout=10).json()
+check("repair money_recovered = DB overstatement of the repaired rows (measured before the fix)",
+      matches(r["money_recovered"], overstated_in_db) and r["fixed"] == overstated_in_db["count"] > 0,
+      f"recovered {r['money_recovered']['count']} / {r['money_recovered']['total_sar']} SAR, "
+      f"DB had {overstated_in_db['count']} / {overstated_in_db['total_sar']:.2f} SAR")
 check("after rollback + repair: overstatement back to 0", money()["ledger_overstatement"]["count"] == 0)
+r = requests.post(f"{URL}/admin/repair-ledger", json={"order_ids": "all_flagged"}, timeout=10).json()
+check("second repair recovers 0", r["money_recovered"]["count"] == 0 and r["fixed"] == 0, str(r))
 
 run("chaos.py", "reset")
 run("supervisor.py", "stop")

@@ -175,6 +175,29 @@ def money_impact() -> dict:
             "ledger_overstatement": sum_money(overstated), "rates_to_sar": RATES_TO_SAR}
 
 
+def order_money(order_ids: list[int]) -> dict:
+    """Value of these orders (e.g. the ones a reprocess just paid)."""
+    if not order_ids:
+        return sum_money([])
+    with connect() as conn:
+        rows = conn.execute(f"SELECT amount, currency FROM orders WHERE id IN ({','.join('?' * len(order_ids))})",
+                            order_ids).fetchall()
+    return sum_money(rows)
+
+
+def ledger_overstatement_of(order_ids: list[int]) -> dict:
+    """How much these ledger rows overstate their orders right now. Read BEFORE repairing them,
+    so the result is the overstatement the repair removes."""
+    if not order_ids:
+        return sum_money([])
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT l.amount - o.amount AS amount, o.currency FROM ledger l JOIN orders o ON o.id = l.order_id "
+            f"WHERE ABS(l.amount - o.amount) > 0.001 AND l.order_id IN ({','.join('?' * len(order_ids))})",
+            order_ids).fetchall()
+    return sum_money(rows)
+
+
 # ---------------------------------------------------------------- counts for /business-metrics
 def counts() -> dict:
     with connect() as conn:

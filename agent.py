@@ -73,11 +73,13 @@ class Diagnosis(BaseModel):
     escalate: bool = Field(description="True if a human must take over")
     summary: str = Field(description="2-3 sentence incident summary for the on-call engineer")
     # Filled in by code from the DB (via /business-metrics), never by the model: see CODE_FIELDS.
-    money_impact_before: dict | None = None
-    money_impact_after: dict | None = None
+    money_impact_before: dict | None = None  # when the run starts (alert time)
+    money_impact_peak: dict | None = None    # just before the first fix is applied; None if no fix was applied
+    money_recovered: dict | None = None      # value of orders reprocessed + ledger overstatement corrected
+    money_impact_after: dict | None = None   # at the end of the run
 
 
-CODE_FIELDS = {"money_impact_before", "money_impact_after"}
+CODE_FIELDS = {"money_impact_before", "money_impact_peak", "money_recovered", "money_impact_after"}
 MODEL_FIELDS = [name for name in Diagnosis.model_fields if name not in CODE_FIELDS]
 
 
@@ -396,23 +398,54 @@ def fetch_money_impact() -> dict | None:
         return None
 
 
+NO_MONEY = {"count": 0, "by_currency": {}, "total_sar": 0.0}
+# Fix tools whose service response includes money_recovered, and where that figure is added up.
+RECOVERY_TOOLS = {"reprocess_orders": "orders_paid", "repair_ledger": "ledger_corrected"}
+
+
+def money_recovered_from(output: str) -> dict | None:
+    """The money_recovered figure in a fix's service response ("HTTP 200: {...}")."""
+    try:
+        return json.loads(output.split(": ", 1)[1])["money_recovered"]
+    except (IndexError, ValueError, KeyError, TypeError):
+        return None
+
+
+def add_money(total: dict, part: dict) -> dict:
+    """Add one money figure (count, by_currency, total_sar) to another."""
+    by_currency = dict(total["by_currency"])
+    for cur, amount in part["by_currency"].items():
+        by_currency[cur] = round(by_currency.get(cur, 0.0) + amount, 2)
+    return {"count": total["count"] + part["count"], "by_currency": dict(sorted(by_currency.items())),
+            "total_sar": round(total["total_sar"] + part["total_sar"], 2)}
+
+
+def describe_amount(label: str, m: dict) -> str:
+    """e.g. 'unpaid orders: 25 = 4,512.30 SAR (SAR 3,000.00, USD 403.28)'."""
+    currencies = ", ".join(f"{cur} {amount:,.2f}" for cur, amount in m["by_currency"].items())
+    return f"{label}: {m['count']} = {m['total_sar']:,.2f} SAR" + (f" ({currencies})" if currencies else "")
+
+
 def describe_money(money: dict | None) -> str:
-    """One readable line, e.g. 'unpaid orders: 25 = 4,512.30 SAR (SAR 3,000.00, USD 403.28); ...'."""
+    """All three exposure figures on one line."""
     if money is None:
         return "unavailable (service unreachable)"
-    parts = []
-    for key, label in [("unpaid_orders", "unpaid orders"), ("queued_orders", "queued orders"),
-                       ("ledger_overstatement", "ledger overstated by")]:
-        m = money[key]
-        currencies = ", ".join(f"{cur} {amount:,.2f}" for cur, amount in m["by_currency"].items())
-        parts.append(f"{label}: {m['count']} = {m['total_sar']:,.2f} SAR" + (f" ({currencies})" if currencies else ""))
-    return "; ".join(parts)
+    return "; ".join(describe_amount(label, money[key]) for key, label in
+                     [("unpaid_orders", "unpaid orders"), ("queued_orders", "queued orders"),
+                      ("ledger_overstatement", "ledger overstated by")])
 
 
-def attach_money_impact(diagnosis: Diagnosis, before: dict | None, after: dict | None) -> Diagnosis:
+def attach_money_impact(diagnosis: Diagnosis, before: dict | None, peak: dict | None, fix_applied: bool,
+                        recovered: dict, after: dict | None) -> Diagnosis:
     """Overwrite the money fields with figures from code, whatever the model sent, and add them to impact."""
-    diagnosis.money_impact_before, diagnosis.money_impact_after = before, after
+    diagnosis.money_impact_before, diagnosis.money_impact_peak = before, peak
+    diagnosis.money_recovered, diagnosis.money_impact_after = recovered, after
+    peak_text = describe_money(peak) if fix_applied else "no fix applied"
+    recovered_text = (describe_amount("orders paid by reprocessing", recovered["orders_paid"]) + "; "
+                      + describe_amount("ledger overstatement corrected", recovered["ledger_corrected"]))
     diagnosis.impact += (f" [Nabd, computed from the DB (USD at 3.75 SAR) - at alert: {describe_money(before)}."
+                         f" Just before the first fix (peak): {peak_text}."
+                         f" Recovered: {recovered_text}."
                          f" At end of run: {describe_money(after)}.]")
     return diagnosis
 
@@ -441,6 +474,8 @@ def run_agent(alert: str,
     fix_counts: Counter = Counter()
     start = time.time()
     money_before = fetch_money_impact()  # "before" = when Nabd picks up the alert
+    money_peak, fix_applied = None, False  # peak = snapshot just before the first approved fix runs
+    money_recovered = {"orders_paid": dict(NO_MONEY), "ledger_corrected": dict(NO_MONEY)}
 
     def emit(kind: str, **data) -> None:
         event = {"t": round(time.time() - start, 1), "kind": kind, **data}
@@ -448,7 +483,8 @@ def run_agent(alert: str,
         on_event(kind, data)
 
     def finish(diagnosis: Diagnosis) -> tuple[Diagnosis, dict]:
-        diagnosis = attach_money_impact(diagnosis, money_before, fetch_money_impact())
+        diagnosis = attach_money_impact(diagnosis, money_before, money_peak, fix_applied,
+                                        money_recovered, fetch_money_impact())
         stats["seconds"] = round(time.time() - start, 1)
         stats["est_cost_usd"] = estimate_cost(stats)
         record["diagnosis"] = diagnosis.model_dump()
@@ -532,10 +568,16 @@ def run_agent(alert: str,
                     output = "REJECTED by human operator. Pick another safe action or escalate."
                     stats["writes_rejected"].append(fix_key)
                 else:
+                    if not fix_applied:  # exposure at its peak: the moment before anything is changed
+                        money_peak, fix_applied = fetch_money_impact(), True
                     output, is_error = run_tool(block.name, block.input)
                     fix_counts[fix_key] += 1
                     if not is_error:
                         stats["writes_applied"].append(fix_key)
+                        part = money_recovered_from(output) if block.name in RECOVERY_TOOLS else None
+                        if part:
+                            key = RECOVERY_TOOLS[block.name]
+                            money_recovered[key] = add_money(money_recovered[key], part)
                 wrote_this_turn = True
             else:
                 output, is_error = run_tool(block.name, block.input)

@@ -203,6 +203,7 @@ class Pipeline:
     def reprocess(self, order_ids: list[int]) -> dict:
         """Retry payment for processed-but-unpaid orders. Safe to run twice: never double-charges."""
         result = {"paid": 0, "skipped_already_paid": 0, "failed": 0}
+        paid_ids = []
         for order_id in order_ids:
             order = db.get_order(order_id)
             if order is None:
@@ -215,10 +216,11 @@ class Pipeline:
                 continue
             if db.record_payment(order_id, order["amount"]):
                 result["paid"] += 1
+                paid_ids.append(order_id)
             else:
                 result["skipped_already_paid"] += 1
         log("INFO", "admin", "reprocess finished", **result)
-        return result
+        return {**result, "money_recovered": db.order_money(paid_ids)}  # only orders paid just now
 
     # ------------------------------------------------------------ ledger sync job
     def _sync_loop(self) -> None:

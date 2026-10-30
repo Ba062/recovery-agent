@@ -186,6 +186,50 @@ checks["model-supplied money is overwritten with the code's before/after figures
 checks["impact text gets the computed line (SAR total + per currency)"] = (
     d.impact.startswith("25 orders unpaid") and "unpaid orders: 25 = 4,512.30 SAR (SAR 3,000.00, USD 403.28)" in d.impact
     and "At end of run: unpaid orders: 0 = 0.00 SAR" in d.impact)
+checks["no fix applied -> peak None, impact says 'no fix applied', nothing recovered"] = (
+    d.money_impact_peak is None and "(peak): no fix applied" in d.impact
+    and d.money_recovered["orders_paid"]["count"] == 0)
+
+
+# ---- peak (just before the first applied fix) and money recovered (from the fix responses)
+def fix_response(count, sar, usd, **extra):
+    m = {"count": count, "by_currency": {"SAR": sar, "USD": usd}, "total_sar": round(sar + usd * 3.75, 2)}
+    return "HTTP 200: " + agent.json.dumps({**extra, "money_recovered": m})
+
+
+agent.TOOL_FUNCS["reprocess_orders"] = lambda order_ids: fix_response(2, 100.0, 10.0, paid=2)
+agent.TOOL_FUNCS["repair_ledger"] = lambda order_ids: fix_response(3, 990.0, 0.0, fixed=3)
+readings = [money(25, 3000.0, 403.28), money(40, 5000.0, 600.0), money(0, 0.0, 0.0)]  # alert, peak, end
+asked, fetched_after_asks = [], []  # approval requests so far, at the moment of each money fetch
+agent.fetch_money_impact = lambda: fetched_after_asks.append(len(asked)) or readings.pop(0)
+fake_recovered = {"orders_paid": {"count": 999, "by_currency": {}, "total_sar": 1e9}}
+d, rec, sent = run([
+    reply("tool_use", tool("restart_worker", {}, 1)),                                   # rejected: no peak yet
+    reply("tool_use", tool("reprocess_orders", {"order_ids": [1, 2]}, 2)),              # first applied fix
+    reply("tool_use", tool("reprocess_orders", {"order_ids": "all_unpaid"}, 3)),
+    reply("tool_use", tool("repair_ledger", {"order_ids": "all_flagged"}, 4)),
+    reply("tool_use", tool("submit_diagnosis", dict(good, confidence=0.9, money_recovered=fake_recovered), 5)),
+], approve=lambda name, args: asked.append(name) or name != "restart_worker")
+# Fetches: at start (0 asks), at the first APPROVED fix (2nd ask: restart was rejected), at the end (4 asks).
+checks["peak taken just before the FIRST APPLIED fix (not at a rejected one, not again later)"] = (
+    fetched_after_asks == [0, 2, 4] and d.money_impact_peak["unpaid_orders"]["count"] == 40
+    and d.money_impact_after["unpaid_orders"]["count"] == 0)
+paid, ledger = d.money_recovered["orders_paid"], d.money_recovered["ledger_corrected"]
+checks["recovered = sum of the fix responses, model's figure ignored"] = (
+    paid == {"count": 4, "by_currency": {"SAR": 200.0, "USD": 20.0}, "total_sar": 275.0}
+    and ledger == {"count": 3, "by_currency": {"SAR": 990.0, "USD": 0.0}, "total_sar": 990.0})
+checks["impact line has peak + recovered"] = (
+    "(peak): unpaid orders: 40 = 7,250.00 SAR" in d.impact
+    and "orders paid by reprocessing: 4 = 275.00 SAR (SAR 200.00, USD 20.00)" in d.impact
+    and "ledger overstatement corrected: 3 = 990.00 SAR" in d.impact)
+agent.TOOL_FUNCS["reprocess_orders"] = fakes["reprocess_orders"]  # back to the one that raises
+agent.fetch_money_impact = lambda: readings.pop(0)
+readings =[money(5, 50.0, 0.0), money(5, 50.0, 0.0), money(5, 50.0, 0.0)]
+d, rec, sent = run([reply("tool_use", tool("reprocess_orders", {"order_ids": "all_unpaid"}, 1)),
+                    reply("tool_use", tool("submit_diagnosis", dict(good, confidence=0.9), 2))])
+checks["a fix that ERRORS recovers nothing (peak still taken: a fix was attempted)"] = (
+    d.money_recovered["orders_paid"]["count"] == 0 and d.money_impact_peak is not None)
+
 readings[:] = [None, None]
 d, rec, sent = run([reply("refusal")])
 checks["service unreachable -> money marked unavailable, no crash (also on give-up path)"] = (

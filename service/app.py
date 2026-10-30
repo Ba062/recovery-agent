@@ -163,6 +163,7 @@ def chaos(body: ChaosIn):
 @app.post("/admin/repair-ledger")
 def repair_ledger(body: RepairLedgerIn):
     ids = db.mismatched_ledger_order_ids() if body.order_ids == "all_flagged" else body.order_ids
+    corrected = db.ledger_overstatement_of(ids)  # measured before the fix: what the repair removes
     fixed = sum(1 for order_id in ids if db.fix_ledger_entry(order_id))
     log("INFO", "admin", "ledger repaired", fixed=fixed)
-    return {"fixed": fixed}
+    return {"fixed": fixed, "money_recovered": corrected}
