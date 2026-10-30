@@ -1,7 +1,7 @@
 """Fault injector and traffic generator for the target service.
 
 Usage:
-    python chaos.py load [seconds] [orders_per_second]   keep orders flowing (run in a 2nd terminal)
+    python chaos.py load [seconds] [orders_per_second] [seed]   keep orders flowing (run in a 2nd terminal)
     python chaos.py payment_drop     bad payment provider URL   -> orders silently go unpaid
     python chaos.py payment_drop_silent  same, but edited by hand: no deploy-history entry
     python chaos.py data_corruption  deploy sync v1.4             -> SAR ledger amounts silently x100
@@ -153,12 +153,17 @@ def reset() -> str:
 
 
 # ---------------------------------------------------------------- traffic
-def load(seconds: float = 60, rate: float = 5) -> None:
-    """Send a steady stream of realistic orders so the metrics keep moving."""
+def load(seconds: float = 60, rate: float = 5, seed: int | None = None) -> None:
+    """Send a steady stream of realistic orders so the metrics keep moving.
+
+    With a seed, the order amounts and currencies are the same every time (the eval uses this
+    so every arm sees the same orders in run k).
+    """
+    rng = random.Random(seed)
     end = time.time() + seconds
     sent = failed = 0
     while time.time() < end:
-        order = {"amount": round(random.uniform(10, 500), 2), "currency": random.choice(["SAR", "SAR", "USD"])}
+        order = {"amount": round(rng.uniform(10, 500), 2), "currency": rng.choice(["SAR", "SAR", "USD"])}
         try:
             requests.post(f"{SERVICE_URL}/orders", json=order, timeout=3).raise_for_status()
             sent += 1
@@ -172,7 +177,7 @@ FAULTS = {"payment_drop": payment_drop, "payment_drop_silent": payment_drop_sile
           "data_corruption": data_corruption, "worker_hang": worker_hang, "compound": compound,
           "unknown": unknown, "reset": reset}
 
-USAGE = f"usage: python chaos.py load [seconds] [orders_per_second] | {' | '.join(FAULTS)}"
+USAGE = f"usage: python chaos.py load [seconds] [orders_per_second] [seed] | {' | '.join(FAULTS)}"
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -181,11 +186,12 @@ if __name__ == "__main__":
             try:
                 secs = float(sys.argv[2]) if len(sys.argv) > 2 else 60
                 per_sec = float(sys.argv[3]) if len(sys.argv) > 3 else 5
+                seed = int(sys.argv[4]) if len(sys.argv) > 4 else None
             except ValueError:
                 sys.exit(USAGE)
             if secs <= 0 or per_sec <= 0:
                 sys.exit("load: seconds and orders_per_second must both be greater than 0")
-            load(secs, per_sec)
+            load(secs, per_sec, seed)
         elif cmd in FAULTS:
             print(FAULTS[cmd]())
         else:

@@ -230,3 +230,6 @@ service/config.yaml.tmp
 
 # live test run records
 tests/live/output/
+
+# Eval: full per-run records (large); results CSVs and RESULTS.md are committed
+eval/runs/

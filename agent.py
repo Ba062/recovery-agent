@@ -46,6 +46,7 @@ EFFORT = "medium"     # low | medium | high | xhigh | max  (no temperature on So
 MAX_STEPS = 12
 MIN_CONFIDENCE = 0.6  # below this the agent must escalate (enforced in code)
 MAX_SAME_FIX = 2      # the same fix with the same arguments at most twice, then escalate
+VERIFY_READINGS = 5   # a "recovered" claim must stay green for 5 monitor readings (~15s), checked in code
 # Server-side fallback: if Sonnet 5.5's safety classifier wrongly declines (e.g. log text that
 # looks like an attack), the API retries on a suitable model inside the same call.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -379,11 +380,17 @@ def enforce_escalation(diagnosis: Diagnosis, repeated_fix_blocked: bool = False)
 
 
 def verify_recovery_claim(diagnosis: Diagnosis) -> tuple[Diagnosis, list[str]]:
-    """Never trust "recovered" on the model's word: re-check the business invariants in code.
+    """Never trust "recovered" on the model's word: re-check the business invariants in code,
+    and keep watching for ~15s (VERIFY_READINGS x 3s). A fix that holds for only a few seconds,
+    like restarting a worker that hangs again, is not a recovery.
     Returns the (possibly corrected) diagnosis and the rules that are still broken."""
     if not diagnosis.recovered:
         return diagnosis, []
-    still_broken = [a.rule for a in monitor.check_once(2)]
+    still_broken = []
+    for _ in range(VERIFY_READINGS):
+        still_broken = [a.rule for a in monitor.check_once(3)]
+        if still_broken:
+            break
     if still_broken:
         diagnosis.recovered = False
         diagnosis.escalate = True

@@ -115,6 +115,21 @@ checks["FALSE recovery claim overridden in code -> not recovered, escalate"] = (
     and any(e["kind"] == "verification" for e in rec["events"]))
 broken_now[:] = []
 
+# A relapse: green at first, broken a few readings later. One quick check would miss it.
+sequence = [[], [], ["queue_backlog"]]
+fake_check_once = agent.monitor.check_once
+agent.monitor.check_once = lambda gap=3: [NS(rule=r) for r in (sequence.pop(0) if sequence else [])]
+d, rec, sent = run([reply("tool_use", tool("submit_diagnosis", honest, 1))])
+agent.monitor.check_once = fake_check_once
+checks["recovery claim that relapses on the 3rd reading -> overridden, escalate"] = (
+    not d.recovered and d.escalate and "queue_backlog" in d.summary and not sequence)
+calls_made = []
+agent.monitor.check_once = lambda gap=3: calls_made.append(gap) or []
+d, rec, sent = run([reply("tool_use", tool("submit_diagnosis", honest, 1))])
+agent.monitor.check_once = fake_check_once
+checks["true recovery: watched for 5 readings of 3s (~15s) before it is accepted"] = (
+    d.recovered and calls_made == [3] * agent.VERIFY_READINGS)
+
 # ---- same fix fails twice -> escalate (design rule 7 / official example 5: never give up silently)
 URL_X = {"key": "payment_provider_url", "value": "x"}
 URL_Y = {"key": "payment_provider_url", "value": "y"}

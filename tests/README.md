@@ -14,6 +14,7 @@ python tests/run_all.py --live    # plus the real-API checks (~5 min, ~$0.40)
 | `check_monitor.py` | Monitor rules on fake data, then live on every scenario | the service |
 | `check_serious_fixes.py` | Regressions: safe PID check, port check, worker survives DB errors, atomic config | the service |
 | `check_minor_fixes.py` | Regressions: config validation, endpoint keywords, clear errors, safe reset | the service |
+| `check_eval.py` | Eval code: grader verdicts on scripted runs, ablations engage and restore, freeze check, resume | nothing |
 | `live/live_diagnose.py` | Recommend mode finds the right root cause and fix order for each scenario | API key |
 | `live/live_act.py` | Act mode really recovers each scenario, claims are truthful, rejections escalate | API key |
 
