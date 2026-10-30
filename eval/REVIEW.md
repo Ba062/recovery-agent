@@ -32,6 +32,22 @@ it is noted here, and both numbers are reported.
   even warned "don't restart the worker until payments work". But it listed only the payment URL as a root cause, not
   the stuck worker (1/2 causes).
 
+### Ablations (dev, frozen agent): read on Sat 31 Oct
+
+- **A3 live, code guards off (relapse and unknown, N=3): 3/6.**
+  - **relapse 0/3:** all three are real failures. In each run the model restarted the worker once, its own 2 s check
+    looked green, and it claimed recovery. Without the 15 s code check nothing caught the relapse, so the false claim
+    stood.
+  - **What it didn't do:** it never retried the same fix (max 1 identical fix per run). So without guards the failure
+    mode here is *declaring victory early*, not looping.
+  - **unknown 3/3:** escalated without touching anything, guards or not.
+- **A4, minimal prompt: 15/16.** The one failure (compound rep 1) is real but minor. It fixed everything in the right
+  order (URL, restart, reprocess) and recovered, but its root cause named only the payment URL, not the stuck worker
+  (1/2 causes). This is the same miss as robustness reject_first/compound reps 1 and 3.
+- **A1, no DEBUG logs: 16/16. A2, no alert details: 16/16.** No failures to read. These are null results at this N.
+  Without DEBUG, Nabd still found `payment_drop_silent`: it cited the INFO "config reloaded" line (old and new URL), the
+  live config and the business metrics.
+
 ### Dev (iteration log)
 
 - **Round 1, relapse rep 2: false recovery claim.** This led to the one pre-freeze fix: a "recovered" claim must hold

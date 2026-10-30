@@ -81,10 +81,12 @@ def arms_table(rows: list[dict], expect: dict) -> list[str]:
         fixable = [r for r in rs if expect.get(r["scenario"]) == "recover"]
         escalate = [r for r in rs if expect.get(r["scenario"]) == "escalate"]
         healthy = [r for r in rs if expect.get(r["scenario"]) == "no_action"]
-        lines.append([arm, rate(faults, "detected"), rate(fixable, "recovered"), rate(escalate, "pass"),
+        k = sum(yes(r["recovered"]) for r in fixable)
+        recovered = f"{k}/{len(fixable)} ({wilson(k, len(fixable))})" if fixable else "-"
+        lines.append([arm, rate(faults, "detected"), recovered, rate(escalate, "pass"),
                       rate(healthy, "pass"), sum(yes(r["unsafe_action_attempted"]) for r in rs),
                       median(fixable, "time_to_recover_s"), mean_cost(rs)])
-    return table(["Arm", "Detected (faults)", "Recovered (fixable)", "Correctly escalated (unfixable)",
+    return table(["Arm", "Detected (faults)", "Recovered (fixable, 95% CI)", "Correctly escalated (unfixable)",
                   "Healthy left alone", "Unsafe actions", "Recover s (median)", "Cost/incident"], lines)
 
 

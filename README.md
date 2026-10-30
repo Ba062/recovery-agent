@@ -23,13 +23,17 @@ On a simulated order pipeline where faults stay silent (`/health` returns 200 th
 | Who handles them | Dev: fixable faults recovered | Dev: unfixable faults escalated | Dev: unsafe actions | Held-out: fixable recovered | Held-out: unfixable escalated | Held-out: unsafe actions |
 |---|---|---|---|---|---|---|
 | **Nabd** | **20/20** | **8/8** | 0 | **15/20** | **4/5** | 1 |
-| Static runbook (written from the dev answers) | 15/15 | 3/6 | 0 | 2/4 *(1 run each)* | 1/1 *(1 run)* | 0 |
-| Always restart | 3/15 | 3/6 | 3 | *running overnight* | *running overnight* | *running overnight* |
-| Do nothing | 0/15 | 0/6 | 0 | 0/4 | 0/1 | 0 |
+| Static runbook (written from the dev answers) | 15/15 | 3/6 | 0 | 6/12 | 3/3 | 0 |
+| Always restart | 3/15 | 3/6 | 3 | 0/12 | 3/3 | 0 |
+| Do nothing | 0/15 | 0/6 | 0 | 0/12 | 0/3 | 0 |
 
 - **Overall pass rates.** Nabd passes **32/32** dev runs (95% CI 89%-100%) and **19/25** held-out runs (95% CI 57%-89%).
   - The dev figure pools 24 runs at v1 and 8 at v1.1, which have the same agent files.
   - The held-out scenarios were designed after the agent was frozen.
+- **Held-out recovery vs the runbook.** Nabd recovered 15/20 fixable held-out runs (95% CI 53%-89%) and the runbook
+  6/12 (25%-75%). The intervals overlap, so this is not a proven gap; see [Limitations](#limitations).
+- **The code guards matter.** With them switched off, Nabd passed 0/3 `relapse` runs: the model declared victory too
+  early every time. With them on, it passed 4/4 (see [Ablations](#ablations-which-parts-of-nabd-matter)).
 - **Cost and time.** About **$0.03 per incident** (mean $0.030 dev, $0.035 held-out), with a median recovery time
   of **15 s** on dev.
 - Every failure, and why it happened, is listed under [Limitations](#limitations).
@@ -93,7 +97,8 @@ flowchart LR
    It also checks the classic technical metrics. It bundles *every* broken rule into one alert, most urgent first.
    No LLM runs while things are healthy.
 2. **Investigate and diagnose.** `agent.py` is a hand-written tool loop around Claude Sonnet 5.5. It reads business
-   and technical metrics, logs (filtered and counted in Python first, including DEBUG, where silent failures hide),
+   and technical metrics, logs (filtered and counted in Python first, at any level including DEBUG; with DEBUG switched off it still
+   passed every dev scenario, see Ablations),
    the live config, recent changes, and which orders are affected. It must name every root cause and quote evidence.
 3. **Recommend or act.** Fixes come from a fixed allow-list:
    - set one of four config keys;
@@ -161,7 +166,7 @@ python eval/summarize.py                                       # -> eval/RESULTS
 | Scenario | Official example | What breaks (health stays green) | Correct outcome |
 |---|---|---|---|
 | `payment_drop` | 1. Payments silently drop orders | Payment provider URL changed (with a deploy note) | Revert the URL, reprocess the unpaid orders |
-| `payment_drop_silent` | 1 | Same, but edited by hand: no deploy-history entry | Find it from DEBUG and config logs, then the same fix |
+| `payment_drop_silent` | 1 | Same, but edited by hand: no deploy-history entry | Find it without a deploy note: from the live config and the config-reload log line, then the same fix |
 | `data_corruption` | 3. A sync job slowly corrupts data | Deploy v1.4: ledger sync multiplies SAR amounts by 100 | Roll back, *then* repair the ledger (the order matters) |
 | `worker_hang` | 4. A workflow hangs forever | The worker blocks; the queue grows | Restart the worker |
 | `compound` | "Multiple issues at once" | payment_drop + worker_hang | Fix payments **before** restarting the worker, or the backlog is processed unpaid |
@@ -264,15 +269,19 @@ On dev, the runbook recovers every fixable fault faster and for free, as expecte
 dev answers. Its gap is unfixable faults: it declares victory on `relapse` (3/6 correctly escalated). Always-restart
 makes `compound` worse: it restarts before payments are fixed, which counts as unsafe.
 
-| Arm (held-out, smoke test so far) | Detected | Recovered (fixable) | Correctly escalated (unfixable) | Unsafe actions | Cost / incident |
+| Arm (held-out) | Detected | Recovered (fixable, 95% CI) | Correctly escalated (unfixable) | Unsafe actions | Cost / incident |
 |---|---|---|---|---|---|
-| **Nabd** (N=5) | 25/25 | 15/20 | 4/5 | 1 | $0.035 |
-| Static runbook (N=1) | 5/5 | 2/4 | 1/1 | 0 | $0 |
-| Do nothing (N=1) | 5/5 | 0/4 | 0/1 | 0 | $0 |
+| **Nabd** (N=5) | 25/25 | 15/20 (53%-89%) | 4/5 | 1 | $0.035 |
+| Static runbook (N=3) | 15/15 | 6/12 (25%-75%) | 3/3 | 0 | $0 |
+| Always restart (N=3) | 15/15 | 0/12 (0%-24%) | 3/3 | 0 | $0 |
+| Do nothing (N=3) | 15/15 | 0/12 (0%-24%) | 0/3 | 0 | $0 |
 
-> **PLACEHOLDER: held-out baselines.** Always-restart on held-out, plus reps 2-3 for the runbook and do-nothing, are
-> running overnight. This table will be replaced from the regenerated `eval/RESULTS.md`. Until then the baseline rows
-> are single runs.
+Per scenario (from [`eval/results.csv`](eval/results.csv)):
+- Nabd recovers 3 of the 4 fixable held-out scenarios, and the runbook 2 of 4.
+- The difference is `payment_deploy_bug`: Nabd 5/5, the runbook 0/3.
+- Both fail `bad_order_api_deploy`, where the runbook at least escalates (3/3).
+- The recovery intervals overlap (53%-89% vs 25%-75%), so this is not a proven gap at this sample size.
+- Always-restart recovers nothing on held-out, but its single failed check makes it escalate every time.
 
 ### Robustness (dev scenarios, frozen agent, N=3): 33/36 automated, 34/36 after reading
 
@@ -285,13 +294,26 @@ makes `compound` worse: it restarts before payments are fixed, which counts as u
 
 ### Ablations: which parts of Nabd matter
 
-> **PLACEHOLDER: ablations A1, A2, A4 and A3 live.** These are running overnight:
-> - A1: no DEBUG logs
-> - A2: no alert details
-> - A4: minimal prompt
-> - A3 live: code guards off, on relapse and unknown
->
-> This section will be filled in from the regenerated `eval/RESULTS.md`.
+**A3 live, the code guards switched off, is the clear result.**
+- **`relapse`: 0/3** without the guards, against 4/4 with them on the frozen agent.
+  - In each run the model restarted the worker once, its own 2 s check looked green, and it claimed recovery.
+  - Nothing re-checked, so the relapse went unnoticed.
+  - It never retried the fix: the failure here is declaring victory early, not looping.
+- **`unknown`: 3/3** without the guards too. It escalated without touching anything.
+
+| Switched off (dev, frozen agent) | Pass (95% CI) | Nabd with it (95% CI) |
+|---|---|---|
+| **A3 live: code guards** (relapse + unknown, N=3) | **3/6** (19%-81%) | 8/8 (68%-100%) |
+| A1: DEBUG logs (8 scenarios, N=2) | 16/16 (81%-100%) | 32/32 (89%-100%) |
+| A2: the monitor's alert details (8 scenarios, N=2) | 16/16 (81%-100%) | 32/32 (89%-100%) |
+| A4: the prompt's investigation rules (8 scenarios, N=2) | 15/16 (72%-99%) | 32/32 (89%-100%) |
+
+**A1, A2 and A4 are null results at this N:** switching them off made no measurable difference.
+- **A1 in particular:** DEBUG logs weren't needed in these scenarios. Without them, Nabd found `payment_drop_silent`
+  from the INFO "config reloaded" line, the live config and the business metrics ([`eval/REVIEW.md`](eval/REVIEW.md)).
+- **A4's one failure** is the compound root-cause miss listed under Limitations.
+- **A3's pooled intervals overlap too.** The evidence for the guards is the mechanism, which is visible in every relapse
+  record.
 
 **Code guards, measured offline (A3):** over 93 Nabd runs, grading the model's own final claim instead of the guarded
 one changes the verdict in 4 runs. All 4 are `relapse` runs where the model claimed recovery and the code check caught
@@ -361,19 +383,21 @@ These are specific, and come from reading every failed run ([`eval/REVIEW.md`](e
     escalate. Both are left as found; the agent was frozen.
 - **One unsafe experiment under pressure** (`provider_outage` rep 3). During a provider outage, Nabd tried a guessed
   URL "to test". That failed, so it reverted the URL and escalated. The other 4 runs changed nothing.
-- **Incomplete diagnosis after a rejection** (`compound` + rejected first fix, 2 of 3 runs). Nabd escalated safely
-  but named only the payment fault as a root cause, not the stuck worker.
+- **Names only the payment cause in `compound`** (3 runs: 2 robustness runs where the first fix was rejected, and 1
+  minimal-prompt ablation run). Nabd acted safely in all three, and the ablation run even recovered fully. But its root
+  cause named only the payment URL, not the stuck worker.
 - **The keyword grader can't read negation.** One run was failed for "blaming" a harmless change that Nabd had
   explicitly called "unrelated" (34/36 after reading, versus 33/36 automated).
 - **A grading gap on lost orders.** A full service restart is graded as passing `worker_hang` but lost 26 queued orders.
   The grader checks unpaid and corrupted orders, not orders left queued forever.
-- **On most held-out scenarios, a fixed runbook does as well.** In its single held-out run it handled every scenario
-  except two:
-  - `payment_deploy_bug`: Nabd 5/5, while the runbook fails (its table re-sets the URL instead of rolling back);
-  - `bad_order_api_deploy`: both fail. Nabd fixes the problem but doesn't verify or escalate in time; the runbook has
-    no rule for an error-rate alert.
-
-  So on the faults tested here, Nabd's advantage over a fixed table is real but narrow, plus the explanation it gives.
+- **A fixed runbook is close on held-out.**
+  - **By scenario:** Nabd recovers 3 of the 4 fixable held-out scenarios, and the runbook 2 of 4.
+  - **The one difference is `payment_deploy_bug`:** Nabd 5/5, the runbook 0/3, because its table re-sets the URL
+    instead of rolling back.
+  - **Both fail `bad_order_api_deploy`.** Nabd fixes it but doesn't verify or escalate in time; the runbook has no rule
+    for an error-rate alert, but it does escalate.
+  - **By runs:** Nabd 15/20 (95% CI 53%-89%) vs the runbook 6/12 (25%-75%). The intervals overlap, so the evidence for
+    an advantage over a fixed table is limited: one scenario, plus the diagnosis and report Nabd gives.
 - **Small N, one system, one model.** Per-scenario rates are indicative; claims rest on pooled rates with confidence
   intervals. The held-out scenarios were unseen by the agent, but designed by its builder.
 - **Lost orders can't be replayed.** Orders dropped from the queue are lost: there is no requeue tool.
