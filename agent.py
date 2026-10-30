@@ -345,10 +345,18 @@ def run_tool(name: str, args: dict) -> tuple[str, bool]:
         return f"Tool error: {e}", True
 
 
-def enforce_escalation(diagnosis: Diagnosis) -> Diagnosis:
-    """Safety rule in code: low confidence always escalates, whatever the model said."""
+def enforce_escalation(diagnosis: Diagnosis, repeated_fix_blocked: bool = False) -> Diagnosis:
+    """Safety rules in code, whatever the model said:
+    - low confidence always escalates
+    - the same fix failed twice (and was blocked a third time) and the system is not
+      verified as recovered -> escalate, never give up silently (official example 5)
+    Call this AFTER verify_recovery_claim, so "recovered" can't be faked to dodge the rule.
+    """
     if diagnosis.confidence < MIN_CONFIDENCE:
         diagnosis.escalate = True
+    if repeated_fix_blocked and not diagnosis.recovered and not diagnosis.escalate:
+        diagnosis.escalate = True
+        diagnosis.summary += " [Nabd: the same fix failed twice without recovery - escalating to a human.]"
     return diagnosis
 
 
@@ -464,7 +472,7 @@ def run_agent(alert: str,
                     stats["recovery_claim_overridden"] = bool(still_broken)
                     if still_broken:
                         emit("verification", text=f"Recovery claim rejected, still broken: {still_broken}")
-                    return finish(enforce_escalation(diagnosis))
+                    return finish(enforce_escalation(diagnosis, repeated_fix_blocked=bool(stats["writes_blocked"])))
             elif block.name in WRITE_TOOLS:
                 fix_key = f"{block.name} {json.dumps(block.input, sort_keys=True)}"
                 if wrote_this_turn:

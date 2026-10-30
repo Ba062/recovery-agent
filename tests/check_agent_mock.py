@@ -113,6 +113,53 @@ checks["FALSE recovery claim overridden in code -> not recovered, escalate"] = (
     and any(e["kind"] == "verification" for e in rec["events"]))
 broken_now[:] = []
 
+# ---- same fix fails twice -> escalate (design rule 7 / official example 5: never give up silently)
+URL_X = {"key": "payment_provider_url", "value": "x"}
+URL_Y = {"key": "payment_provider_url", "value": "y"}
+
+
+def same_fix_three_times(final: dict, then=None):
+    """Apply the same fix twice, try it a third time, optionally do something else, then submit."""
+    steps = [reply("tool_use", tool("set_config", URL_X, i)) for i in range(3)]
+    if then:
+        steps.append(reply("tool_use", tool(*then, 3)))
+    steps.append(reply("tool_use", tool("submit_diagnosis", final, 9)))
+    return run(steps)
+
+
+before = calls.count("set_config x")
+gives_up = dict(good, confidence=0.9, recovered=False, escalate=False)  # high confidence, so it can't mask the rule
+d, rec, sent = same_fix_three_times(gives_up)
+checks["same fix: executed only twice, third attempt BLOCKED and recorded"] = (
+    calls.count("set_config x") - before == 2 and len(rec["stats"]["writes_blocked"]) == 1
+    and "BLOCKED" in last_user(sent, 3)[0]["content"])
+checks["same fix failed twice, model gives up silently -> code FORCES escalate"] = (
+    d.escalate and not d.recovered and "same fix failed twice" in d.summary)
+
+broken_now[:] = ["payment_gap"]
+d, rec, sent = same_fix_three_times(dict(good, confidence=0.9, recovered=True, escalate=False))
+checks["same fix failed twice, model falsely claims recovered -> still escalates"] = d.escalate and not d.recovered
+broken_now[:] = []
+
+d, rec, sent = same_fix_three_times(dict(good, confidence=0.9, recovered=True, escalate=False),
+                                    then=("restart_worker", {}))
+checks["blocked fix, but a DIFFERENT fix really recovered (verified) -> no forced escalation"] = (
+    d.recovered and not d.escalate and len(rec["stats"]["writes_blocked"]) == 1)
+
+before_x, before_y = calls.count("set_config x"), calls.count("set_config y")
+d, rec, sent = run([reply("tool_use", tool("set_config", URL_X, 1)), reply("tool_use", tool("set_config", URL_X, 2)),
+                    reply("tool_use", tool("set_config", URL_Y, 3)),
+                    reply("tool_use", tool("submit_diagnosis", dict(good, confidence=0.9), 4))])
+checks["same tool with DIFFERENT arguments is a different fix -> not blocked"] = (
+    calls.count("set_config x") - before_x == 2 and calls.count("set_config y") - before_y == 1
+    and not rec["stats"]["writes_blocked"])
+
+d, rec, sent = run([reply("tool_use", tool("reprocess_orders", {"order_ids": "all_unpaid"}, i)) for i in range(3)]
+                   + [reply("tool_use", tool("submit_diagnosis", gives_up, 9))])
+checks["a fix that ERRORS twice also counts as failed twice -> blocked + escalate"] = (
+    last_user(sent, 1)[0]["is_error"] and last_user(sent, 2)[0]["is_error"]
+    and "BLOCKED" in last_user(sent, 3)[0]["content"] and d.escalate)
+
 script = [reply("tool_use", tool("read_logs", {}, i)) for i in range(agent.MAX_STEPS)]
 d, rec, sent = run(script)
 checks["step limit -> escalate"] = d.escalate and rec["stats"]["steps"] == agent.MAX_STEPS
