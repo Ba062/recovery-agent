@@ -352,6 +352,19 @@ def enforce_escalation(diagnosis: Diagnosis) -> Diagnosis:
     return diagnosis
 
 
+def verify_recovery_claim(diagnosis: Diagnosis) -> tuple[Diagnosis, list[str]]:
+    """Never trust "recovered" on the model's word: re-check the business invariants in code.
+    Returns the (possibly corrected) diagnosis and the rules that are still broken."""
+    if not diagnosis.recovered:
+        return diagnosis, []
+    still_broken = [a.rule for a in monitor.check_once(2)]
+    if still_broken:
+        diagnosis.recovered = False
+        diagnosis.escalate = True
+        diagnosis.summary += f" [Nabd verification: NOT recovered - still broken: {', '.join(still_broken)}.]"
+    return diagnosis, still_broken
+
+
 def estimate_cost(stats: dict) -> float:
     return round((stats["input_tokens"] * PRICE_PER_MTOK["input"]
                   + stats["output_tokens"] * PRICE_PER_MTOK["output"]
@@ -447,6 +460,10 @@ def run_agent(alert: str,
                     # Bad fields (e.g. confidence "high"): tell the model and let it retry.
                     output, is_error = f"Invalid diagnosis, fix these fields and call submit_diagnosis again:\n{e}", True
                 else:
+                    diagnosis, still_broken = verify_recovery_claim(diagnosis)
+                    stats["recovery_claim_overridden"] = bool(still_broken)
+                    if still_broken:
+                        emit("verification", text=f"Recovery claim rejected, still broken: {still_broken}")
                     return finish(enforce_escalation(diagnosis))
             elif block.name in WRITE_TOOLS:
                 fix_key = f"{block.name} {json.dumps(block.input, sort_keys=True)}"
