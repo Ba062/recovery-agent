@@ -95,6 +95,7 @@ class Pipeline:
         self.processed = 0
         self.dropped = 0
         self.last_heartbeat = time.time()
+        self.last_sync_run = time.time()  # when the sync job last RAN (even with nothing to copy)
 
         # Worker restart: Python threads can't be killed, so each worker belongs to a
         # "generation". Restarting bumps the generation and wakes any stuck worker so it exits.
@@ -231,6 +232,7 @@ class Pipeline:
 
     def sync_once(self) -> int:
         """Copy paid orders into the ledger."""
+        self.last_sync_run = time.time()
         version = self.config.get("version")
         rows = db.paid_orders_not_in_ledger()
         for row in rows:
@@ -250,4 +252,5 @@ class Pipeline:
             "dropped": self.dropped,
             "queue_depth": self.jobs.qsize(),
             "worker_heartbeat_age_s": round(time.time() - self.last_heartbeat, 1),
+            "sync_last_run_age_s": round(time.time() - self.last_sync_run, 1),
         }

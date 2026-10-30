@@ -119,6 +119,17 @@ def mismatched_ledger_order_ids() -> list[int]:
     return [r["order_id"] for r in rows]
 
 
+def ledger_mismatch_details(limit: int = 10) -> list[dict]:
+    """A sample of mismatched ledger rows with both amounts, so the cause is visible."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT l.order_id, o.amount AS order_amount, l.amount AS ledger_amount, o.currency "
+            "FROM ledger l JOIN orders o ON o.id = l.order_id "
+            "WHERE ABS(l.amount - o.amount) > 0.001 ORDER BY l.order_id LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def fix_ledger_entry(order_id: int) -> bool:
     """Copy the correct amount from orders back into the ledger."""
     with connect() as conn:
@@ -134,11 +145,9 @@ def counts() -> dict:
     with connect() as conn:
         orders = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
         payments = conn.execute("SELECT COUNT(*) FROM payments").fetchone()[0]
-        last_sync = conn.execute("SELECT MAX(synced_at) FROM ledger").fetchone()[0]
     return {
         "orders_created": orders,
         "payments_recorded": payments,
         "orders_without_payment": len(unpaid_processed_order_ids()),
         "integrity_failures": len(mismatched_ledger_order_ids()),
-        "last_sync_ts": last_sync,
     }

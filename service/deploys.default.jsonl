@@ -1,2 +1,2 @@
 {"ts": "2026-10-28T09:00:00+00:00", "version": "v1.2", "change": "initial release of order pipeline", "by": "ci"}
-{"ts": "2026-10-29T14:30:00+00:00", "version": "v1.3", "change": "ledger sync job: batch inserts", "by": "ci"}
+{"ts": "2026-10-29T14:30:00+00:00", "version": "v1.3", "change": "order API: stricter input validation", "by": "ci"}

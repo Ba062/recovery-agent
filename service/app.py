@@ -108,6 +108,23 @@ def business_metrics():
     return {**db.counts(), **pipeline.stats()}
 
 
+@app.get("/config")
+def live_config():
+    """The config the pipeline is ACTUALLY using right now (it may lag config.yaml by ~2s)."""
+    return pipeline.config
+
+
+@app.get("/data-integrity")
+def data_integrity():
+    """Which orders are affected (read-only). Gives the agent exact ids and impact."""
+    unpaid = db.unpaid_processed_order_ids()
+    mismatched = db.mismatched_ledger_order_ids()
+    return {
+        "unpaid_processed_orders": {"count": len(unpaid), "sample_ids": unpaid[:10]},
+        "ledger_mismatches": {"count": len(mismatched), "sample": db.ledger_mismatch_details(10)},
+    }
+
+
 # ---------------------------------------------------------------- admin (used by the agent's write tools)
 # Each endpoint accepts only ITS keyword. A shared model let "all_flagged" reach /reprocess,
 # where the string was looped over letter by letter.
@@ -138,7 +155,7 @@ class ChaosIn(BaseModel):
 def chaos(body: ChaosIn):
     """Used ONLY by chaos.py to inject in-process faults. Not one of the agent's tools."""
     pipeline.stuck = True
-    log("DEBUG", "worker", "worker blocked waiting on lock")  # the only (quiet) trace of the hang
+    log("DEBUG", "worker", "worker entered wait state")  # the only (quiet) trace of the hang
     return {"injected": body.fault}
 
 
