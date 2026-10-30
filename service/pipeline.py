@@ -24,13 +24,45 @@ GOOD_PROVIDER_URL = "internal://payments-v1"
 REQUIRED_KEYS = {"version", "payment_provider_url", "queue_max", "worker_count", "sync_interval_s"}
 
 
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)  # True/False are ints in Python
+
+
+def validate_config(cfg: dict) -> list[str]:
+    """Return a list of problems ([] = valid).
+
+    This only rejects values that would crash or silently kill part of the pipeline.
+    "Wrong but meaningful" values (a bad provider URL, a tiny queue_max, version v1.4)
+    are allowed on purpose: those are the faults the agent has to diagnose.
+    """
+    missing = REQUIRED_KEYS - set(cfg)
+    if missing:
+        return [f"missing keys: {sorted(missing)}"]
+    problems = []
+    if not isinstance(cfg["version"], str):
+        problems.append("version must be a string")
+    if not isinstance(cfg["payment_provider_url"], str):
+        problems.append("payment_provider_url must be a string")
+    if not _is_int(cfg["queue_max"]) or cfg["queue_max"] < 0:
+        problems.append("queue_max must be a whole number >= 0")
+    if not _is_int(cfg["worker_count"]) or not 1 <= cfg["worker_count"] <= 8:
+        problems.append("worker_count must be a whole number from 1 to 8")
+    interval = cfg["sync_interval_s"]
+    if not (_is_int(interval) or isinstance(interval, float)) or not 0.5 <= interval <= 3600:
+        problems.append("sync_interval_s must be a number from 0.5 to 3600")
+    return problems
+
+
 def write_config(cfg: dict) -> None:
-    """Write config.yaml atomically: write a temp file, then swap it in.
+    """Validate, then write config.yaml atomically: write a temp file, then swap it in.
 
     A plain write empties the file first, so the hot-reloader could read a half-written
     file. os.replace swaps the whole file in one step. On Windows the swap fails if the
     reloader has the file open at that instant, so retry briefly.
     """
+    problems = validate_config(cfg)
+    if problems:
+        raise ValueError("invalid config: " + "; ".join(problems))
     tmp = CONFIG_FILE.with_suffix(".yaml.tmp")
     tmp.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     for _ in range(20):
@@ -52,9 +84,9 @@ def call_payment_provider(url: str, amount: float) -> None:
 class Pipeline:
     def __init__(self) -> None:
         self.config = self._read_config()
-        missing = REQUIRED_KEYS - set(self.config)
-        if missing:
-            raise RuntimeError(f"{CONFIG_FILE.name} is missing keys: {sorted(missing)}")
+        problems = validate_config(self.config)
+        if problems:
+            raise RuntimeError(f"{CONFIG_FILE.name} is invalid: {'; '.join(problems)}")
         self._config_mtime = CONFIG_FILE.stat().st_mtime
         self._bad_config_mtime = None
         self.jobs: queue.Queue = queue.Queue()  # size limit is checked by hand in submit()
@@ -78,7 +110,7 @@ class Pipeline:
     def _config_watcher(self) -> None:
         """Hot-reload config.yaml every 2s, so config fixes apply without a restart.
 
-        An empty, half-written or incomplete file is NOT applied: the last good config stays
+        An empty, half-written or invalid file is NOT applied: the last good config stays
         active and the file is read again on the next tick.
         """
         while True:
@@ -88,11 +120,11 @@ class Pipeline:
                 if mtime == self._config_mtime:
                     continue
                 new = self._read_config()
-                missing = REQUIRED_KEYS - set(new)
-                if missing:
+                problems = validate_config(new)
+                if problems:
                     if mtime != self._bad_config_mtime:  # log once per bad version, not every 2s
                         log("ERROR", "config", "invalid config ignored, keeping last good config",
-                            missing_keys=sorted(missing))
+                            problems=problems)
                         self._bad_config_mtime = mtime
                     continue  # mtime not saved, so the next tick tries again
                 changed = {k: {"old": self.config.get(k), "new": v}
@@ -190,11 +222,12 @@ class Pipeline:
     # ------------------------------------------------------------ ledger sync job
     def _sync_loop(self) -> None:
         while True:
-            time.sleep(float(self.config.get("sync_interval_s", 5)))
-            try:
+            try:  # the sleep is inside the try too, so nothing can kill this thread silently
+                time.sleep(float(self.config.get("sync_interval_s", 5)))
                 self.sync_once()
             except Exception as e:
                 log("ERROR", "sync", f"ledger sync failed: {e}")
+                time.sleep(5)
 
     def sync_once(self) -> int:
         """Copy paid orders into the ledger."""

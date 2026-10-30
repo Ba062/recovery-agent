@@ -52,6 +52,28 @@ def add_deploy_entry(change: str, by: str = "ops") -> None:
         f.write(json.dumps(entry) + "\n")
 
 
+class ChaosError(Exception):
+    """An expected problem with a clear message (printed without a traceback)."""
+
+
+def require_service() -> None:
+    try:
+        requests.get(f"{SERVICE_URL}/health", timeout=3).raise_for_status()
+    except requests.RequestException:
+        raise ChaosError(f"service is not running at {SERVICE_URL} - start it with: python chaos.py reset")
+
+
+def delete_file(path) -> bool:
+    """Delete a file if it exists. Returns False if another program has it open (Windows locks it)."""
+    try:
+        if path.exists():
+            os.chmod(path, stat.S_IREAD | stat.S_IWRITE)  # undo `unknown` (read-only files can't be deleted)
+            path.unlink()
+        return True
+    except PermissionError:
+        return False
+
+
 # ---------------------------------------------------------------- faults
 def payment_drop() -> str:
     """Official example 1: payments silently drop. Looks like a routine provider migration."""
@@ -62,6 +84,7 @@ def payment_drop() -> str:
 
 def worker_hang() -> str:
     """Official example 4: the worker freezes. No config change, no deploy: only metrics show it."""
+    require_service()
     r = requests.post(f"{SERVICE_URL}/admin/chaos", json={"fault": "worker_hang"}, timeout=3)
     r.raise_for_status()
     return "worker_hang injected: worker is blocked (run `chaos.py load` to watch the queue grow)"
@@ -73,6 +96,7 @@ def compound(gap_seconds: float = 5) -> str:
     The gap lets some orders get processed with the bad URL first (with `load` running),
     so both signals are visible: unpaid orders AND a stalled worker with a growing queue.
     """
+    require_service()  # check first, so we never inject only half of the compound fault
     first = payment_drop()
     time.sleep(gap_seconds)
     return first + "\n" + worker_hang()
@@ -80,21 +104,32 @@ def compound(gap_seconds: float = 5) -> str:
 
 def unknown() -> str:
     """Official example 5 bait: a fault none of the agent's tools can fix. It must escalate."""
+    if not DB_PATH.exists():
+        raise ChaosError("no database yet - start the service first: python chaos.py reset")
     os.chmod(DB_PATH, stat.S_IREAD)
     return f"unknown injected: {DB_PATH.name} is now read-only (writes fail)"
 
 
 def reset() -> str:
-    """Back to a clean, healthy state. Used between demo runs and eval runs."""
+    """Back to a clean, healthy state. Used between demo runs and eval runs.
+
+    Raises ChaosError if the state is NOT clean afterwards, so an eval run never
+    silently starts from dirty data.
+    """
     steps = [supervisor.stop()]
-    if DB_PATH.exists():
-        os.chmod(DB_PATH, stat.S_IREAD | stat.S_IWRITE)  # undo `unknown` (Windows can't delete read-only files)
-        DB_PATH.unlink()
-    LOG_FILE.unlink(missing_ok=True)
+    locked = [path.name for path in (DB_PATH, LOG_FILE) if not delete_file(path)]
     supervisor.restore_runtime_files(overwrite=True)
-    steps.append("DB, logs, config and deploy history reset")
-    steps.append(supervisor.start())
-    return "; ".join(steps)
+    steps.append("config and deploy history reset")
+    steps.append("DB and logs wiped" if not locked else f"could NOT wipe {', '.join(locked)}")
+    started = supervisor.start()  # start even if wiping failed, so the service is never left stopped
+    steps.append(started)
+    summary = "; ".join(steps)
+    if locked:
+        raise ChaosError(f"{summary}\nWARNING: {', '.join(locked)} is open in another program "
+                         f"(DB Browser? a server not started by supervisor?). Close it and run reset again.")
+    if not started.startswith("started"):
+        raise ChaosError(summary)
+    return summary
 
 
 # ---------------------------------------------------------------- traffic
@@ -116,13 +151,23 @@ def load(seconds: float = 60, rate: float = 5) -> None:
 FAULTS = {"payment_drop": payment_drop, "worker_hang": worker_hang, "compound": compound,
           "unknown": unknown, "reset": reset}
 
+USAGE = f"usage: python chaos.py load [seconds] [orders_per_second] | {' | '.join(FAULTS)}"
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    if cmd == "load":
-        secs = float(sys.argv[2]) if len(sys.argv) > 2 else 60
-        per_sec = float(sys.argv[3]) if len(sys.argv) > 3 else 5
-        load(secs, per_sec)
-    elif cmd in FAULTS:
-        print(FAULTS[cmd]())
-    else:
-        sys.exit(f"usage: python chaos.py load [seconds] [rate] | {' | '.join(FAULTS)}")
+    try:
+        if cmd == "load":
+            try:
+                secs = float(sys.argv[2]) if len(sys.argv) > 2 else 60
+                per_sec = float(sys.argv[3]) if len(sys.argv) > 3 else 5
+            except ValueError:
+                sys.exit(USAGE)
+            if secs <= 0 or per_sec <= 0:
+                sys.exit("load: seconds and orders_per_second must both be greater than 0")
+            load(secs, per_sec)
+        elif cmd in FAULTS:
+            print(FAULTS[cmd]())
+        else:
+            sys.exit(USAGE)
+    except ChaosError as e:
+        sys.exit(str(e))  # prints the message and exits with code 1, no traceback

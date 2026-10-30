@@ -14,6 +14,7 @@ from typing import Literal
 
 import psutil
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -40,6 +41,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Nabd target: order pipeline", lifespan=lifespan)
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    """422 without echoing the input back: an input like NaN can't be written as JSON,
+    so FastAPI's default error response would itself crash with a 500."""
+    errors = [{"loc": list(e["loc"]), "msg": e["msg"]} for e in exc.errors()]
+    return JSONResponse({"detail": errors}, status_code=422)
+
+
 @app.middleware("http")
 async def track_requests(request: Request, call_next):
     """Record latency + status for /metrics, and turn crashes into logged 500s."""
@@ -61,7 +70,7 @@ async def track_requests(request: Request, call_next):
 
 # ---------------------------------------------------------------- traffic
 class OrderIn(BaseModel):
-    amount: float = Field(gt=0)
+    amount: float = Field(gt=0, le=1_000_000, allow_inf_nan=False)  # "1e309" would be infinity
     currency: Literal["SAR", "USD"] = "SAR"
 
 
@@ -100,8 +109,14 @@ def business_metrics():
 
 
 # ---------------------------------------------------------------- admin (used by the agent's write tools)
-class OrderIdsIn(BaseModel):
-    order_ids: list[int] | Literal["all_unpaid", "all_flagged"]
+# Each endpoint accepts only ITS keyword. A shared model let "all_flagged" reach /reprocess,
+# where the string was looped over letter by letter.
+class ReprocessIn(BaseModel):
+    order_ids: list[int] | Literal["all_unpaid"]
+
+
+class RepairLedgerIn(BaseModel):
+    order_ids: list[int] | Literal["all_flagged"]
 
 
 @app.post("/admin/restart-worker")
@@ -110,7 +125,7 @@ def restart_worker():
 
 
 @app.post("/admin/reprocess")
-def reprocess(body: OrderIdsIn):
+def reprocess(body: ReprocessIn):
     ids = db.unpaid_processed_order_ids() if body.order_ids == "all_unpaid" else body.order_ids
     return pipeline.reprocess(ids)
 
@@ -128,7 +143,7 @@ def chaos(body: ChaosIn):
 
 
 @app.post("/admin/repair-ledger")
-def repair_ledger(body: OrderIdsIn):
+def repair_ledger(body: RepairLedgerIn):
     ids = db.mismatched_ledger_order_ids() if body.order_ids == "all_flagged" else body.order_ids
     fixed = sum(1 for order_id in ids if db.fix_ledger_entry(order_id))
     log("INFO", "admin", "ledger repaired", fixed=fixed)
