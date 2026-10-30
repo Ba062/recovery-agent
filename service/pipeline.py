@@ -7,6 +7,7 @@ The bugs that chaos.py triggers live here on purpose, and they are all *silent*:
   - a "stuck" worker blocks forever and stops heartbeating   (official example 4)
 """
 
+import os
 import queue
 import random
 import threading
@@ -20,6 +21,25 @@ from service.jsonlog import log
 
 CONFIG_FILE = Path(__file__).resolve().parent / "config.yaml"
 GOOD_PROVIDER_URL = "internal://payments-v1"
+REQUIRED_KEYS = {"version", "payment_provider_url", "queue_max", "worker_count", "sync_interval_s"}
+
+
+def write_config(cfg: dict) -> None:
+    """Write config.yaml atomically: write a temp file, then swap it in.
+
+    A plain write empties the file first, so the hot-reloader could read a half-written
+    file. os.replace swaps the whole file in one step. On Windows the swap fails if the
+    reloader has the file open at that instant, so retry briefly.
+    """
+    tmp = CONFIG_FILE.with_suffix(".yaml.tmp")
+    tmp.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    for _ in range(20):
+        try:
+            os.replace(tmp, CONFIG_FILE)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    raise RuntimeError(f"could not write {CONFIG_FILE} (file kept busy)")
 
 
 def call_payment_provider(url: str, amount: float) -> None:
@@ -32,7 +52,11 @@ def call_payment_provider(url: str, amount: float) -> None:
 class Pipeline:
     def __init__(self) -> None:
         self.config = self._read_config()
+        missing = REQUIRED_KEYS - set(self.config)
+        if missing:
+            raise RuntimeError(f"{CONFIG_FILE.name} is missing keys: {sorted(missing)}")
         self._config_mtime = CONFIG_FILE.stat().st_mtime
+        self._bad_config_mtime = None
         self.jobs: queue.Queue = queue.Queue()  # size limit is checked by hand in submit()
         self.lock = threading.Lock()
         self.enqueued = 0
@@ -48,10 +72,15 @@ class Pipeline:
 
     # ------------------------------------------------------------ config
     def _read_config(self) -> dict:
-        return yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
+        cfg = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8"))
+        return cfg if isinstance(cfg, dict) else {}
 
     def _config_watcher(self) -> None:
-        """Hot-reload config.yaml every 2s, so config fixes apply without a restart."""
+        """Hot-reload config.yaml every 2s, so config fixes apply without a restart.
+
+        An empty, half-written or incomplete file is NOT applied: the last good config stays
+        active and the file is read again on the next tick.
+        """
         while True:
             time.sleep(2)
             try:
@@ -59,6 +88,13 @@ class Pipeline:
                 if mtime == self._config_mtime:
                     continue
                 new = self._read_config()
+                missing = REQUIRED_KEYS - set(new)
+                if missing:
+                    if mtime != self._bad_config_mtime:  # log once per bad version, not every 2s
+                        log("ERROR", "config", "invalid config ignored, keeping last good config",
+                            missing_keys=sorted(missing))
+                        self._bad_config_mtime = mtime
+                    continue  # mtime not saved, so the next tick tries again
                 changed = {k: {"old": self.config.get(k), "new": v}
                            for k, v in new.items() if self.config.get(k) != v}
                 self.config, self._config_mtime = new, mtime
@@ -111,16 +147,22 @@ class Pipeline:
                 job = self.jobs.get(timeout=1)
             except queue.Empty:
                 continue
-            self._process(job)
+            try:
+                self._process(job)
+            except Exception as e:
+                # A real error (e.g. the DB can't be written) is logged loudly, and the worker
+                # keeps running: one bad job must never kill the thread silently.
+                log("ERROR", "worker", f"job failed: {e}", order_id=job["order_id"])
 
     def _process(self, job: dict) -> None:
         try:
             call_payment_provider(self.config.get("payment_provider_url", ""), job["amount"])
-            db.record_payment(job["order_id"], job["amount"])
         except Exception as e:
-            # BUG (on purpose): the error is swallowed and only logged at DEBUG,
+            # BUG (on purpose): the provider error is swallowed and only logged at DEBUG,
             # and the order is still marked processed -> the order silently has no payment.
             log("DEBUG", "payment", f"provider call failed: {e}", order_id=job["order_id"])
+        else:
+            db.record_payment(job["order_id"], job["amount"])  # DB errors go up to _worker
         db.mark_processed(job["order_id"])
         with self.lock:
             self.processed += 1

@@ -5,6 +5,7 @@ Usage:  python supervisor.py start | stop | restart | status
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -35,13 +36,26 @@ def restore_runtime_files(overwrite: bool) -> None:
 
 
 def running_process() -> psutil.Process | None:
+    """The service process from the PID file, but only if it really is our server.
+
+    Windows reuses PIDs, so a stale PID file can point at an unrelated program.
+    Checking the command line stops `stop` from ever killing the wrong process.
+    """
     if not PID_FILE.exists():
         return None
     try:
         proc = psutil.Process(int(PID_FILE.read_text()))
-        return proc if proc.is_running() else None
-    except (psutil.NoSuchProcess, ValueError):
-        return None
+        if proc.is_running() and "service.app:app" in proc.cmdline():
+            return proc
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+        pass
+    return None
+
+
+def port_in_use() -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", int(PORT))) == 0
 
 
 def wait_until_healthy(seconds: float = 10) -> bool:
@@ -59,6 +73,10 @@ def wait_until_healthy(seconds: float = 10) -> bool:
 def start() -> str:
     if running_process():
         return "already running"
+    if port_in_use():
+        # Something we didn't start is on our port. Its /health answer would make a failed
+        # start look successful, so refuse instead.
+        return f"NOT started: port {PORT} is already used by another process (not started by supervisor)"
     restore_runtime_files(overwrite=False)
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     UVICORN_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +91,11 @@ def start() -> str:
         creationflags=flags,
     )
     PID_FILE.write_text(str(proc.pid))
-    if wait_until_healthy():
+    healthy = wait_until_healthy()
+    if proc.poll() is not None:  # our process already exited: whatever answered wasn't us
+        PID_FILE.unlink(missing_ok=True)
+        return f"FAILED to start (exit code {proc.returncode}) - check {UVICORN_LOG}"
+    if healthy:
         return f"started (pid {proc.pid})"
     return f"started (pid {proc.pid}) but not healthy yet - check {UVICORN_LOG}"
 
@@ -82,6 +104,8 @@ def stop() -> str:
     proc = running_process()
     if proc is None:
         PID_FILE.unlink(missing_ok=True)
+        if port_in_use():
+            return f"not running (but port {PORT} is used by another process - stop it by hand)"
         return "not running"
     # On Windows the venv python.exe is a launcher that starts the real Python as a child,
     # so stop the children too or the server keeps running and holds the port.

@@ -25,6 +25,7 @@ import yaml
 import supervisor
 from service.db import DB_PATH
 from service.jsonlog import LOG_FILE
+from service.pipeline import write_config
 
 SERVICE_URL = os.getenv("SERVICE_URL", "http://127.0.0.1:8000")
 CONFIG_FILE = supervisor.ROOT / "service" / "config.yaml"
@@ -38,7 +39,7 @@ def set_config(key: str, value) -> object:
     cfg = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
     old = cfg.get(key)
     cfg[key] = value
-    CONFIG_FILE.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    write_config(cfg)  # atomic, so the service never reads a half-written file
     return old
 
 
