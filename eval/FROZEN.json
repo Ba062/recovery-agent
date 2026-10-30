@@ -1,6 +1,7 @@
 {
-  "utc": "2026-10-30T14:16:45+00:00",
-  "code_version": "3edb406d0160",
+  "tag": "nabd-frozen-v1.1",
+  "utc": "2026-10-30T15:55:48+00:00",
+  "code_version": "6af255f330af",
   "fingerprint": "365928b5883c",
   "files": {
     "agent.py": "248796889a38f998472b78a3655fbb5acb69c4d9c2e8ce9a207062f20cc1a932",
@@ -8,14 +9,56 @@
     "chaos.py": "87b66d29d3724f5b33fd35c8ce7ad9a7038b28bc6e406e2b41084f85aab75b8c",
     "supervisor.py": "e7570bfd4ce1090c81c6fa5d9ce955f46e53ca7e818bf7e2a85e56b6c668cf1c",
     "requirements.txt": "f857369ab761ee70490073438fb751ed9445d18b28423743de30694778207296",
-    "service/app.py": "585d2604a88c8592e748807568d86c45e440ba831ed77ed1fa5bf1d37779df70",
+    "service/app.py": "2b26061a921b63e968df98bd756ea397daff9ad8633118d41a035276a63604ca",
     "service/db.py": "a4774a39ab45d019a51cdcd4a3428b15e96cd46001f61ca315393ca82713e919",
-    "service/pipeline.py": "84a3576362145c8af7bd31d93843e00250ffd764977c399d4845da87e4d47b04",
+    "service/pipeline.py": "c603709d88180c1b4c712878008ee1bac2cda40bf2d487927ed344e57a52d6a9",
     "service/jsonlog.py": "dd750a594cb9b8d2788ea085f5628df91066171c187e8d39d9221f67f9249b09",
     "service/config.default.yaml": "cf0a6c762b4cc15a883a402f31bd316e596d81a51f697fefab2a3936c23c0ca1",
     "service/deploys.default.jsonl": "cd1c56dd760a49bb96e68447a375f2f6d9724915edcb721ff46724e47a08c56d",
     "eval/scenarios.py": "035e3efef0d4caf08ef26b288973ab44e79578915803cdd38322be03f770796a",
     "eval/grade.py": "dc421d90d99eb596c7fca8fe42a9ba6ab656fcac398a202f52351ebc9e14ac8a",
     "eval/arms.py": "8f460600e9e706af8f61aa670e9983fd32994851699f0277f0b6aff708aa465b"
-  }
+  },
+  "previous": [
+    {
+      "utc": "2026-10-30T14:16:45+00:00",
+      "code_version": "3edb406d0160",
+      "fingerprint": "365928b5883c",
+      "files": {
+        "agent.py": "248796889a38f998472b78a3655fbb5acb69c4d9c2e8ce9a207062f20cc1a932",
+        "monitor.py": "43725caa385ec3a623c9643cad27d00e2d0c49e632c3e4d29aa2621bbaa48bb7",
+        "chaos.py": "87b66d29d3724f5b33fd35c8ce7ad9a7038b28bc6e406e2b41084f85aab75b8c",
+        "supervisor.py": "e7570bfd4ce1090c81c6fa5d9ce955f46e53ca7e818bf7e2a85e56b6c668cf1c",
+        "requirements.txt": "f857369ab761ee70490073438fb751ed9445d18b28423743de30694778207296",
+        "service/app.py": "585d2604a88c8592e748807568d86c45e440ba831ed77ed1fa5bf1d37779df70",
+        "service/db.py": "a4774a39ab45d019a51cdcd4a3428b15e96cd46001f61ca315393ca82713e919",
+        "service/pipeline.py": "84a3576362145c8af7bd31d93843e00250ffd764977c399d4845da87e4d47b04",
+        "service/jsonlog.py": "dd750a594cb9b8d2788ea085f5628df91066171c187e8d39d9221f67f9249b09",
+        "service/config.default.yaml": "cf0a6c762b4cc15a883a402f31bd316e596d81a51f697fefab2a3936c23c0ca1",
+        "service/deploys.default.jsonl": "cd1c56dd760a49bb96e68447a375f2f6d9724915edcb721ff46724e47a08c56d",
+        "eval/scenarios.py": "035e3efef0d4caf08ef26b288973ab44e79578915803cdd38322be03f770796a",
+        "eval/grade.py": "dc421d90d99eb596c7fca8fe42a9ba6ab656fcac398a202f52351ebc9e14ac8a",
+        "eval/arms.py": "8f460600e9e706af8f61aa670e9983fd32994851699f0277f0b6aff708aa465b"
+      }
+    }
+  ],
+  "identical_to_previous": [
+    "agent.py",
+    "chaos.py",
+    "eval/arms.py",
+    "eval/grade.py",
+    "eval/scenarios.py",
+    "monitor.py",
+    "requirements.txt",
+    "service/config.default.yaml",
+    "service/db.py",
+    "service/deploys.default.jsonl",
+    "service/jsonlog.py",
+    "supervisor.py"
+  ],
+  "changed_since_previous": [
+    "service/app.py",
+    "service/pipeline.py"
+  ],
+  "agent_unchanged": true
 }
