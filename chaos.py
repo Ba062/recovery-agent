@@ -4,7 +4,8 @@ Usage:
     python chaos.py load [seconds] [orders_per_second]   keep orders flowing (run in a 2nd terminal)
     python chaos.py payment_drop     bad payment provider URL   -> orders silently go unpaid
     python chaos.py payment_drop_silent  same, but edited by hand: no deploy-history entry
-    python chaos.py worker_hang     worker blocks forever       -> queue silently grows
+    python chaos.py data_corruption  deploy sync v1.4             -> SAR ledger amounts silently x100
+    python chaos.py worker_hang    worker blocks forever       -> queue silently grows
     python chaos.py compound         payment_drop + worker_hang at once
     python chaos.py unknown          DB file made read-only      -> no tool can fix it, must escalate
     python chaos.py reset            stop service, wipe DB + logs, restore default config, start again
@@ -93,6 +94,14 @@ def payment_drop_silent() -> str:
     return f"payment_drop_silent injected: payment_provider_url {old} -> {BAD_PROVIDER_URL} (not in deploy history)"
 
 
+def data_corruption() -> str:
+    """Official example 3: a sync job that slowly corrupts data. Deploys v1.4, whose ledger sync
+    multiplies SAR amounts by 100. Only ledger rows synced from now on are wrong, so it grows quietly."""
+    old = set_config("version", "v1.4")
+    add_deploy_entry("ledger sync job: currency handling refactor", by="ci")
+    return f"data_corruption injected: version {old} -> v1.4 (SAR ledger amounts x100 from now on)"
+
+
 def worker_hang() -> str:
     """Official example 4: the worker freezes. No config change, no deploy: only metrics show it."""
     require_service()
@@ -159,7 +168,8 @@ def load(seconds: float = 60, rate: float = 5) -> None:
     print(f"load done: {sent} orders sent, {failed} failed")
 
 
-FAULTS = {"payment_drop": payment_drop, "payment_drop_silent": payment_drop_silent, "worker_hang": worker_hang, "compound": compound,
+FAULTS = {"payment_drop": payment_drop, "payment_drop_silent": payment_drop_silent,
+          "data_corruption": data_corruption, "worker_hang": worker_hang, "compound": compound,
           "unknown": unknown, "reset": reset}
 
 USAGE = f"usage: python chaos.py load [seconds] [orders_per_second] | {' | '.join(FAULTS)}"

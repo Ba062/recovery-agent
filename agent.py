@@ -289,7 +289,8 @@ WRITE_TOOL_SCHEMAS = [
     _tool("reprocess_orders", "[WRITE - needs human approval] Retry payment for processed orders that have no "
           "payment. Never double-charges.", {"order_ids": _ids("all_unpaid")}, ["order_ids"]),
     _tool("repair_ledger", "[WRITE - needs human approval] Copy correct amounts from orders back into "
-          "mismatched ledger rows.", {"order_ids": _ids("all_flagged")}, ["order_ids"]),
+          "mismatched ledger rows. If a bad version is still syncing, new rows get corrupted again "
+          "after the repair, so stop the cause first.", {"order_ids": _ids("all_flagged")}, ["order_ids"]),
 ]
 SUBMIT_TOOL = _tool("submit_diagnosis", "Submit your final structured diagnosis. Always finish by calling this.",
                     Diagnosis.model_json_schema()["properties"], list(Diagnosis.model_fields))
@@ -303,6 +304,8 @@ so it stays green during silent failures. Judge the system by its business invar
 
 How to work:
 1. Investigate with read-only tools. Recent config changes and DEBUG-level logs often hold the cause.
+   If a config value looks wrong and the change isn't in recent_changes, read the config logs
+   before concluding.
 2. Diagnose every root cause. There may be more than one at once. Quote exact evidence.
    Only blame a change if its timing and evidence actually match when the incident started.
 3. Fix with the smallest action that addresses each root cause, one write action at a time.

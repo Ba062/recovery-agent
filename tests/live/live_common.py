@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[2]  # the project root (this file is in tests/live/)
 OUTPUT = Path(__file__).resolve().parent / "output"  # saved run records (git-ignored)
 PY = sys.executable
-SCENARIOS = ["payment_drop", "payment_drop_silent", "worker_hang", "compound", "unknown"]
+SCENARIOS = ["payment_drop", "payment_drop_silent", "data_corruption", "worker_hang", "compound", "unknown"]
 sys.path.insert(0, str(ROOT))
 
 
@@ -82,6 +82,7 @@ ACTIONS = {
     "restart": ("restart_worker", "restart"),
     "reprocess": ("reprocess",),
     "rollback": ("rollback",),
+    "repair": ("repair_ledger", "repair"),
 }
 
 

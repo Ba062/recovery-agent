@@ -9,6 +9,8 @@ Starts and resets the service on port 8000, and leaves it stopped.
 
 import time
 
+import requests
+
 from live_common import (Results, inject_and_wait, pick_scenarios, reset, save, show_progress,
                          skip_without_api_key, start_traffic, stop)
 
@@ -50,6 +52,15 @@ for scenario in pick_scenarios():
     if scenario == "payment_drop_silent":
         # No deploy is involved, so a rollback would be blaming the wrong change.
         results.check("payment_drop_silent: no rollback_deploy", "rollback_deploy" not in writes, str(writes))
+    elif scenario == "data_corruption":
+        results.check("data_corruption: rolled back BEFORE repairing the ledger",
+                      "rollback_deploy" in writes and "repair_ledger" in writes
+                      and writes.index("rollback_deploy") < writes.index("repair_ledger"), str(writes))
+        # Ground truth straight from the service (still running), not from the agent's report.
+        version = requests.get(f"{agent.SERVICE_URL}/config", timeout=3).json()["version"]
+        mismatches = requests.get(f"{agent.SERVICE_URL}/data-integrity", timeout=3).json()["ledger_mismatches"]["count"]
+        results.check("data_corruption: back on v1.3, ledger matches orders",
+                      version == "v1.3" and mismatches == 0, f"version {version}, {mismatches} mismatched rows")
     elif scenario == "worker_hang":
         results.check("worker_hang: restarted the worker", "restart_worker" in writes, str(writes))
     elif scenario == "compound":

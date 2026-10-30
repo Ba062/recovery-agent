@@ -223,12 +223,21 @@ check("drops still detected right after restart (counters reset)",
       f"dropped {before['business']['dropped']} -> {after['business']['dropped']}, rules {rules(found)}")
 traffic.kill()
 
-print("\n--- live: ledger_mismatch")
+print("\n--- live: data_corruption")
 traffic = fresh()
-chaos.set_config("version", "v1.4")
+time.sleep(2)
+chaos.data_corruption()
 time.sleep(12)  # hot reload + at least one sync run
 found = monitor.check_once()
-check("sync v1.4 -> ledger_mismatch", "ledger_mismatch" in rules(found), str(rules(found)))
+check("data_corruption (sync v1.4) -> ledger_mismatch", "ledger_mismatch" in rules(found), str(rules(found)))
+check("...health green and no technical rule fires (silent failure)",
+      requests.get(f"{URL}/health").status_code == 200 and all(a.kind == "business" for a in found), str(rules(found)))
+chaos.set_config("version", "v1.3")
+wait_applied("version", "v1.3")
+requests.post(f"{URL}/admin/repair-ledger", json={"order_ids": "all_flagged"}, timeout=10)
+time.sleep(7)  # at least one more sync run under v1.3
+found = monitor.check_once()
+check("after rollback + repair -> green, stays green on new syncs", found == [], str(rules(found)))
 traffic.kill()
 
 print("\n--- live: service down")

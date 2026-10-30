@@ -114,6 +114,35 @@ check("config reload log shows old -> new URL",
       bool(reloads) and reloads[-1]["changed"]["payment_provider_url"] == {"old": "internal://payments-v1", "new": "internal://payments-v2"},
       str(reloads[-1]["changed"]) if reloads else "no reload line")
 
+print("\n--- data_corruption (deploy sync v1.4)")
+run("chaos.py", "reset")
+load(3)
+run("chaos.py", "data_corruption")
+last = json.loads(deploys.read_text(encoding="utf-8").splitlines()[-1])
+load(10)  # hot reload + at least one sync run under v1.4
+m = bm()
+check("health stays green", health_ok())
+check("error_rate stays 0", requests.get(f"{URL}/metrics").json()["error_rate"] == 0.0)
+check("integrity failures appear", m["integrity_failures"] > 0, f"{m['integrity_failures']} bad ledger rows")
+check("deploy history records v1.4", last["version"] == "v1.4" and last["by"] == "ci", last["change"])
+sample = requests.get(f"{URL}/data-integrity", timeout=3).json()["ledger_mismatches"]["sample"]
+check("every bad row is SAR with ledger = 100 x order amount",
+      bool(sample) and all(r["currency"] == "SAR" and abs(r["ledger_amount"] - 100 * r["order_amount"]) < 0.01 for r in sample),
+      str(sample[:2]))
+# Wrong order: repairing while v1.4 still runs only helps until the next sync.
+requests.post(f"{URL}/admin/repair-ledger", json={"order_ids": "all_flagged"}, timeout=10)
+check("repair while v1.4 is live clears it for now", bm()["integrity_failures"] == 0)
+load(8)
+check("...but new rows are corrupted again", bm()["integrity_failures"] > 0, f"{bm()['integrity_failures']} bad rows")
+# Right order: roll back, then repair.
+subprocess.run([PY, "-c", "import chaos; chaos.set_config('version','v1.3')"], cwd=ROOT)
+wait_applied("version", "v1.3")
+r = requests.post(f"{URL}/admin/repair-ledger", json={"order_ids": "all_flagged"}, timeout=10).json()
+load(8)
+m = bm()
+check("rollback THEN repair -> ledger matches orders and stays that way",
+      m["integrity_failures"] == 0 and r["fixed"] > 0, f"fixed {r['fixed']}, failures now {m['integrity_failures']}")
+
 print("\n--- worker_hang")
 run("chaos.py", "reset")
 load(2)

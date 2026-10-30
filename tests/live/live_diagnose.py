@@ -40,6 +40,17 @@ for scenario in pick_scenarios():
         # No deploy is involved, so a rollback would be blaming the wrong change.
         results.check("payment_drop_silent: does not recommend a rollback",
                       action_index(recs, "rollback") is None, str([r[:60] for r in recs]))
+        # Without the deploy entry, the old value is only in the config reload log. "Set it to the
+        # correct endpoint" means the agent never found it.
+        url_rec = recs[url] if url is not None else ""
+        results.check("payment_drop_silent: names payments-v1 as the revert target",
+                      "payments-v1" in url_rec.lower(), url_rec[:90])
+    elif scenario == "data_corruption":
+        results.check("data_corruption: blames the v1.4 deploy", mentions(causes, "v1.4"))
+        rollback, repair = action_index(recs, "rollback"), action_index(recs, "repair")
+        results.check("data_corruption: recommends rollback BEFORE repairing the ledger",
+                      rollback is not None and repair is not None and rollback < repair,
+                      f"rollback {rollback}, repair {repair}")
     elif scenario == "worker_hang":
         results.check("worker_hang: identifies the stuck worker", mentions(causes, "worker"))
         restart = action_index(recs, "restart")
