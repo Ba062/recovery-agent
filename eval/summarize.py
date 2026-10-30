@@ -197,6 +197,10 @@ def main(paths_in: list[Path], path_out: Path) -> None:
                f"`git diff {previous.get('tag', 'nabd-frozen-v1')} {frozen.get('tag')} -- agent.py monitor.py eval/grade.py`"
                f" (empty output).", ""]
 
+    review = EVAL / "REVIEW.md"  # written by hand after reading the failed runs' records (PLAN.md 6.5)
+    if review.exists():
+        md += [review.read_text(encoding="utf-8").strip(), ""]
+
     failures = [r for r in current if not yes(r["pass"])
                 and not (r["arm"] in ("do_nothing",) and expect.get(r["scenario"]) != "no_action")]
     md += ["## Every failed run", ""]

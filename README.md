@@ -16,8 +16,8 @@ would be dropped, so we state it here:
 - **The agent must be byte-identical between the two tags**: `agent.py` (prompt, tools, guards), `monitor.py` and the eval
   grader. Verify with `git diff nabd-frozen-v1 nabd-frozen-v1.1 -- agent.py monitor.py eval/grade.py eval/scenarios.py eval/arms.py`
   (empty output). `eval/RESULTS.md` records the file hashes and agent fingerprints of both freezes.
-- The held-out definitions and their expected outcomes are committed before any held-out run (the commit will be
-  linked here once it exists).
+- The held-out definitions and their expected outcomes were committed in `554f884` (tagged `nabd-frozen-v1.1` via
+  `6599f35`), before any held-out run.
 - Checks that the hooks are inert in normal operation, run after adding them (Fri 30 Oct), **all passed**:
   - the full no-API test suite `tests/run_all.py`: 336/336 checks, including `tests/check_hooks.py` (16/16), which shows
     each hook works when triggered and is off after a reset;
