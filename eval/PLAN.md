@@ -335,7 +335,9 @@ python eval/summarize.py
 
 1. B4 static runbook: **yes**.
 2. relapse and healthy added to dev: **yes**. The relapse fix is timeboxed to 30 min before the freeze.
-3. Held-out: **Badr writes the ideas, plus one from a mentor, after the freeze.**
+3. Held-out: **Badr writes the ideas, plus one from a mentor, after the freeze.** In the end no mentor idea was
+   given: all five held-out scenarios were designed by Badr after the freeze. Three of them needed fault hooks in the
+   frozen service, so the agent was re-frozen as `nabd-frozen-v1.1` with the agent byte-identical (`eval/HELDOUT.md`).
 4. Baselines run in a **second checkout on another port**.
 5. **$20 cap** and the cut order are fine. **Dev N=3, held-out N=5.** Robustness R5 (no write access)
    and R6 (30% tool failures) are dropped unless time allows.

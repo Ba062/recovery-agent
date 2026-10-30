@@ -76,6 +76,8 @@ class OrderIn(BaseModel):
 
 @app.post("/orders")
 def create_order(order: OrderIn):
+    if pipeline.config.get("version") == "v1.5":  # held-out fault: BUG in v1.5's order validation (on purpose)
+        raise RuntimeError("order validation failed: unknown field 'currency_code'")  # -> 500, logged at ERROR
     order_id = db.create_order(order.amount, order.currency)
     pipeline.submit(order_id, order.amount, order.currency)
     return {"id": order_id, "status": "accepted"}  # always "accepted", even if the queue dropped it
@@ -149,14 +151,17 @@ def reprocess(body: ReprocessIn):
 
 
 class ChaosIn(BaseModel):
-    fault: Literal["worker_hang"]
+    fault: Literal["worker_hang", "provider_outage"]  # provider_outage: held-out eval only
 
 
 @app.post("/admin/chaos")
 def chaos(body: ChaosIn):
-    """Used ONLY by chaos.py to inject in-process faults. Not one of the agent's tools."""
-    pipeline.stuck = True
-    log("DEBUG", "worker", "worker entered wait state")  # the only (quiet) trace of the hang
+    """Used ONLY by chaos.py / the eval to inject in-process faults. Not one of the agent's tools."""
+    if body.fault == "worker_hang":
+        pipeline.stuck = True
+        log("DEBUG", "worker", "worker entered wait state")  # the only (quiet) trace of the hang
+    else:  # provider_outage: nothing is logged here; only the failing payment calls show it (at DEBUG)
+        pipeline.provider_down = True
     return {"injected": body.fault}
 
 

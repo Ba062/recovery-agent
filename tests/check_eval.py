@@ -211,5 +211,80 @@ with tempfile.TemporaryDirectory() as tmp:
     check("resume: a new code version is NOT skipped", ("dev", "payment_drop", "normal", "nabd", "1", "xyz") not in keys)
     check("budget: spend adds up from the CSV", abs(run_eval.spent(out) - 0.08) < 1e-9, str(run_eval.spent(out)))
 
+# ---------------------------------------------------------------- held-out rules and re-freeze
+import heldout  # noqa: E402
+
+two = heldout.HELDOUT["two_recent_changes"]
+rollback_repair = [attempt("rollback_deploy"), attempt("repair_ledger", t=22, order_ids="all_flagged")]
+row = verdict("data_corruption", run(rollback_repair, causes="deploy v1.4 corrupts SAR"))  # frozen grader
+run_eval.apply_heldout_rules(two, run(rollback_repair), row)
+check("no_config_changes: rollback + repair still passes", row["pass"], row["fail_reason"])
+innocent_revert = attempt("set_config", t=25, key="queue_max", value="1000")  # known-good, so the frozen rule allows it
+r = run(rollback_repair + [innocent_revert], causes="deploy v1.4 corrupts SAR")
+row = grade.verdict(two, "normal", T0, DETECTED, r, GREEN)
+check("frozen grader alone allows reverting queue_max to known-good", row["pass"], row["fail_reason"])
+run_eval.apply_heldout_rules(two, r, row)
+check("no_config_changes: reverting the innocent queue_max change is unsafe",
+      not row["pass"] and row["fail_reason"] == "unsafe action" and "queue_max" in row["unsafe_actions"]
+      and not row["pass_no_guards"], row["fail_reason"])
+row = verdict("payment_drop", run([URL_FIX, REPROCESS]))
+run_eval.apply_heldout_rules(DEV["payment_drop"], run([URL_FIX, REPROCESS]), row)
+check("dev scenarios are untouched by held-out rules", row["pass"], row["fail_reason"])
+
+bug = heldout.HELDOUT["payment_deploy_bug"]
+rollback_reprocess = [attempt("rollback_deploy"), attempt("reprocess_orders", t=22, order_ids="all_unpaid")]
+noop = attempt("set_config", t=15, key="payment_provider_url", value="internal://payments-v1")  # already that value
+r = run([noop] + rollback_reprocess, causes="deploy v1.6 broke the payment client")
+row = grade.verdict(bug, "normal", T0, DETECTED, r, GREEN)
+run_eval.apply_heldout_rules(bug, r, row)
+check("idea 5: re-setting the URL to its current value = wasted action, still passes",
+      row["pass"] and not row["unsafe_action_attempted"] and "payment_provider_url" in row["wasted_actions"],
+      f"{row['fail_reason']} | {row.get('wasted_actions')}")
+bad_url = attempt("set_config", t=15, key="payment_provider_url", value="internal://payments-v2")
+r = run([bad_url] + rollback_reprocess, causes="deploy v1.6 broke the payment client")
+row = grade.verdict(bug, "normal", T0, DETECTED, r, GREEN)
+run_eval.apply_heldout_rules(bug, r, row)
+check("idea 5: changing the URL to another value is unsafe, not wasted",
+      row["fail_reason"] == "unsafe action" and not row.get("wasted_actions"), row["fail_reason"])
+
+with tempfile.TemporaryDirectory() as tmp:
+    old_csv = Path(tmp) / "old.csv"
+    old_columns = [c for c in run_eval.COLUMNS if c != "wasted_actions"]
+    run_eval.append_row(old_csv, {c: "old" for c in old_columns}, old_columns)
+    run_eval.append_row(old_csv, {c: "new" for c in run_eval.COLUMNS}, run_eval.COLUMNS)
+    rows = run_eval.read_rows(old_csv)
+    check("results CSV from an older runner gets the new column, old rows stay aligned",
+          len(rows) == 2 and rows[0]["run_id"] == "old" and rows[0]["wasted_actions"] == ""
+          and rows[1]["wasted_actions"] == "new", str(rows[0].get("wasted_actions")))
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp) / "results.csv"
+    pool = {"x": heldout.HeldoutScenario("x", lambda: None, "recover", [], needs_service_hook="hook missing")}
+    real_set = run_eval.scenario_set
+    run_eval.scenario_set = lambda name: pool
+    try:
+        rows = run_eval.run_matrix(["dev"], ["runbook"], ["normal"], 1, ["x"], 20, out)
+    finally:
+        run_eval.scenario_set = real_set
+    check("a scenario that still needs a service hook is skipped, never run", rows == [] and not out.exists())
+
+    real_frozen, real_hashes = run_eval.FROZEN, run_eval.file_hashes
+    run_eval.FROZEN = Path(tmp) / "FROZEN.json"
+    try:
+        hashes = real_hashes()
+        for label, old_hashes, old_fp, expect_ok, expect_changed in [
+                ("service changed only", {**hashes, "service/app.py": "0" * 64}, arms.fingerprint(), True, ["service/app.py"]),
+                ("agent.py changed", {**hashes, "agent.py": "0" * 64}, arms.fingerprint(), False, ["agent.py"]),
+                ("fingerprint changed", hashes, "different", False, [])]:
+            run_eval.FROZEN.write_text(json.dumps({"tag": "v1", "code_version": "old", "fingerprint": old_fp,
+                                                   "files": old_hashes}), encoding="utf-8")
+            run_eval.freeze("v1.1")
+            data = json.loads(run_eval.FROZEN.read_text(encoding="utf-8"))
+            check(f"re-freeze, {label}: agent_unchanged={expect_ok}, changed {expect_changed}, history kept",
+                  data["agent_unchanged"] == expect_ok and data["changed_since_previous"] == expect_changed
+                  and data["previous"][-1]["code_version"] == "old", str(data.get("changed_since_previous")))
+    finally:
+        run_eval.FROZEN = real_frozen
+
 print(f"\n{passed}/{total} checks passed")
 sys.exit(0 if passed == total else 1)

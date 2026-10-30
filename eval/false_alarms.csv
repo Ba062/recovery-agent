@@ -1,0 +1,3 @@
+utc,code_version,orders_per_s,minutes,readings,alerts,alerts_per_hour,rules
+2026-10-30T15:38:44+00:00,3edb406d0160,5,10.0,196,0,0.0,
+2026-10-30T15:43:49+00:00,3edb406d0160,20,5.0,98,0,0.0,

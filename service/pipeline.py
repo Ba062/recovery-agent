@@ -5,6 +5,9 @@ The bugs that chaos.py triggers live here on purpose, and they are all *silent*:
   - a full queue drops the order and only bumps a counter   (official example 2)
   - sync job v1.4 multiplies SAR amounts by 100              (official example 3)
   - a "stuck" worker blocks forever and stops heartbeating   (official example 4)
+Added after the freeze, for the held-out eval only (eval/HELDOUT.md); off unless triggered:
+  - version v1.6 breaks the payment client (swallowed like any payment error)
+  - provider_down: the payment provider stops answering (set by /admin/chaos provider_outage)
 """
 
 import os
@@ -101,6 +104,7 @@ class Pipeline:
         # "generation". Restarting bumps the generation and wakes any stuck worker so it exits.
         self.generation = 0
         self.stuck = False                  # set by chaos (worker_hang)
+        self.provider_down = False          # set by chaos (provider_outage, held-out eval)
         self.unstick = threading.Event()
 
     # ------------------------------------------------------------ config
@@ -189,7 +193,7 @@ class Pipeline:
 
     def _process(self, job: dict) -> None:
         try:
-            call_payment_provider(self.config.get("payment_provider_url", ""), job["amount"])
+            self._pay(job["amount"])
         except Exception as e:
             # BUG (on purpose): the provider error is swallowed and only logged at DEBUG,
             # and the order is still marked processed -> the order silently has no payment.
@@ -199,6 +203,15 @@ class Pipeline:
         db.mark_processed(job["order_id"])
         with self.lock:
             self.processed += 1
+
+    def _pay(self, amount: float) -> None:
+        """Charge one order through the payment provider. Raises if the payment fails."""
+        url = self.config.get("payment_provider_url", "")
+        if self.provider_down:  # held-out fault: the provider itself is down, the URL is fine
+            raise ConnectionError(f"payment provider timed out at {url}")
+        if self.config.get("version") == "v1.6":  # held-out fault: BUG in v1.6's payment client (on purpose)
+            raise TypeError("Object of type Decimal is not JSON serializable")
+        call_payment_provider(url, amount)
 
     def reprocess(self, order_ids: list[int]) -> dict:
         """Retry payment for processed-but-unpaid orders. Safe to run twice: never double-charges."""
@@ -210,7 +223,7 @@ class Pipeline:
                 result["failed"] += 1
                 continue
             try:
-                call_payment_provider(self.config.get("payment_provider_url", ""), order["amount"])
+                self._pay(order["amount"])
             except Exception:
                 result["failed"] += 1
                 continue

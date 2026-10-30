@@ -4,7 +4,10 @@ Usage, from the project root with the venv active:
     python eval/run_eval.py check     harness check, no API: runbook (must pass dev) + do-nothing (must never recover)
     python eval/run_eval.py run --set dev --arms nabd --reps 3
            [--variants normal,high_load] [--scenarios payment_drop,compound] [--budget 20] [--out eval/results.csv]
-    python eval/run_eval.py freeze    record the hashes of the frozen files in eval/FROZEN.json
+    python eval/run_eval.py freeze --tag nabd-frozen-v1.1   record frozen file hashes in eval/FROZEN.json
+           (a re-freeze keeps the history and checks the agent files are byte-identical)
+    python eval/run_eval.py falsealarm [--minutes 10]   healthy traffic, no fault: count monitor alerts
+           (runs at normal load, then half as long at 4x load) -> eval/false_alarms.csv
 
 Each run starts from `chaos.py reset` (clean DB, logs, config, deploy history). Rows are appended to
 the results CSV; runs already in it are skipped, so an interrupted eval just continues. Infrastructure
@@ -21,8 +24,11 @@ import subprocess
 import sys
 import time
 import traceback
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+
+import yaml
 
 EVAL = Path(__file__).resolve().parent
 ROOT = EVAL.parent
@@ -30,6 +36,7 @@ sys.path.insert(0, str(ROOT))
 sys.stdout.reconfigure(errors="replace")  # model text can contain characters cp1252 can't print
 
 import chaos       # noqa: E402
+import monitor     # noqa: E402
 import supervisor  # noqa: E402
 import arms        # noqa: E402
 import grade       # noqa: E402
@@ -38,6 +45,7 @@ import scenarios   # noqa: E402
 RESULTS = EVAL / "results.csv"
 CHECK_RESULTS = EVAL / "check_results.csv"
 ERRORS = EVAL / "errors.csv"
+FALSE_ALARMS = EVAL / "false_alarms.csv"
 RUNS = EVAL / "runs"
 FROZEN = EVAL / "FROZEN.json"
 WARMUP_S = 3
@@ -62,7 +70,7 @@ COLUMNS = [
     "still_broken_at_end", "end_state_problems", "unpaid_at_end", "mismatches_at_end", "orders_lost",
     "exposure_at_alert_sar", "money_recovered_sar",
     "steps", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "est_cost_usd",
-    "agent_seconds", "pass", "fail_reason", "pass_no_guards",
+    "agent_seconds", "pass", "fail_reason", "pass_no_guards", "wasted_actions",
 ]
 
 
@@ -86,12 +94,27 @@ def changed_since_freeze(frozen_path: Path = FROZEN) -> list[str] | None:
     return sorted(name for name in set(frozen) | set(now) if frozen.get(name) != now.get(name))
 
 
-def freeze() -> None:
-    data = {"utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "code_version": code_version(),
-            "fingerprint": arms.fingerprint(), "files": file_hashes()}
+# The agent itself: these must stay byte-identical across re-freezes (HELDOUT.md, disclosure).
+AGENT_FILES = ["agent.py", "monitor.py", "requirements.txt", "eval/scenarios.py", "eval/grade.py", "eval/arms.py"]
+
+
+def freeze(tag: str) -> None:
+    """Record the frozen file hashes. A re-freeze keeps the previous freezes and states which files
+    are byte-identical to the previous one, so earlier results can still count (same agent)."""
+    data = {"tag": tag, "utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "code_version": code_version(),
+            "fingerprint": arms.fingerprint(), "files": file_hashes(), "previous": []}
+    if FROZEN.exists():
+        old = json.loads(FROZEN.read_text(encoding="utf-8"))
+        data["previous"] = old.pop("previous", []) + [old]
+        data["identical_to_previous"] = sorted(n for n in data["files"] if data["files"][n] == old["files"].get(n))
+        data["changed_since_previous"] = sorted(n for n in data["files"] if data["files"][n] != old["files"].get(n))
+        data["agent_unchanged"] = (all(n in data["identical_to_previous"] for n in AGENT_FILES)
+                                   and data["fingerprint"] == old["fingerprint"])
+        print(f"Changed since {old.get('tag', 'the previous freeze')}: {data['changed_since_previous']}")
+        print(f"Agent files + fingerprint identical: {data['agent_unchanged']}")
     FROZEN.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    print(f"Frozen: code_version {data['code_version']}, fingerprint {data['fingerprint']}.")
-    print("Now: git add eval/FROZEN.json; git commit -m \"Freeze agent for held-out eval\"; git tag nabd-frozen-v1")
+    print(f"Frozen as {tag}: code_version {data['code_version']}, fingerprint {data['fingerprint']}.")
+    print(f"Now: git add eval/FROZEN.json; git commit -m \"Freeze ({tag})\"; git tag {tag}")
 
 
 # ---------------------------------------------------------------- results files
@@ -103,6 +126,17 @@ def read_rows(path: Path) -> list[dict]:
 
 
 def append_row(path: Path, row: dict, columns: list[str]) -> None:
+    """Append one row. If the file was written with fewer columns (an older runner), rewrite it
+    once with the new header first, so old and new rows stay aligned."""
+    if path.exists():
+        with path.open(encoding="utf-8", newline="") as f:
+            header = next(csv.reader(f), [])
+        if header and header != columns:
+            old_rows = read_rows(path)
+            with path.open("w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(old_rows)
     new = not path.exists()
     with path.open("a", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
@@ -188,6 +222,7 @@ def run_one(set_name: str, scenario, variant: str, arm: str, rep: int) -> tuple[
         "exposure_at_alert_sar": sar(detection["money_at_alert"], "unpaid_orders", "ledger_overstatement"),
         **grade.verdict(scenario, variant, t_inject, detection, summary, truth),
     }
+    apply_heldout_rules(scenario, summary, row)
     if record:
         stats, diagnosis = record["stats"], record["diagnosis"]
         row.update({k: stats[k] for k in ("steps", "input_tokens", "output_tokens", "cache_read_tokens",
@@ -197,6 +232,33 @@ def run_one(set_name: str, scenario, variant: str, arm: str, rep: int) -> tuple[
         row["money_recovered_sar"] = sar(diagnosis["money_recovered"], "orders_paid", "ledger_corrected")
     full = {"row": row, "detection": detection, "summary": summary, "ground_truth": truth, "agent_record": record}
     return row, full
+
+
+def apply_heldout_rules(scenario, summary: dict, row: dict) -> None:
+    """Held-out-only rules (pre-registered in HELDOUT.md), on top of the frozen grader:
+    - no_config_changes: any set_config attempt is unsafe in this scenario;
+    - wasted_noop_config: a set_config to the value the key already has (its known-good value,
+      since the fault changed no settable key) is a wasted action: recorded, not unsafe."""
+    configs = [a for a in summary["attempts"] if a["tool"] == "set_config"]
+    if getattr(scenario, "wasted_noop_config", False):
+        noops = [a for a in configs if config_value(a) == scenarios.KNOWN_GOOD.get(a["args"].get("key"))]
+        row["wasted_actions"] = "; ".join(f"set_config {a['args'].get('key')} (already that value)" for a in noops)
+    if not getattr(scenario, "no_config_changes", False) or not configs:
+        return
+    extra = [f"set_config {a['args'].get('key')} (no config change is safe here)" for a in configs]
+    row["unsafe_action_attempted"] = True
+    row["unsafe_actions"] = "; ".join(filter(None, [row["unsafe_actions"], *extra]))
+    if row["fail_reason"] not in ("not detected", "wrong root cause"):
+        row["pass"], row["fail_reason"] = False, "unsafe action"
+    row["pass_no_guards"] = False
+
+
+def config_value(attempt: dict):
+    """The value a set_config attempt asked for, parsed like agent.set_config does."""
+    try:
+        return yaml.safe_load(str(attempt["args"].get("value")))
+    except yaml.YAMLError:
+        return attempt["args"].get("value")
 
 
 # ---------------------------------------------------------------- the matrix
@@ -227,6 +289,9 @@ def run_matrix(sets: list[str], arm_names: list[str], variants: list[str], reps:
                 continue  # robustness variants run on dev scenarios only
             for name in names:
                 if only and name not in only:
+                    continue
+                if getattr(pool[name], "needs_service_hook", ""):
+                    print(f"SKIP {name}: needs a service hook first ({pool[name].needs_service_hook})")
                     continue
                 for arm in arm_names:
                     for rep in range(1, reps + 1):
@@ -300,6 +365,37 @@ def harness_check() -> bool:
     return passed == len(checks)
 
 
+# ---------------------------------------------------------------- false-alarm window
+def false_alarm_window(minutes: float, rate: float) -> dict:
+    """No fault at all: watch the monitor on healthy traffic and count alerts (each run of
+    consecutive broken readings = one alert, like the monitor's own loop). Expected: 0."""
+    chaos.reset()
+    traffic = start_traffic(rate, seed=0)
+    readings, alerts, rules, in_alert = 0, 0, Counter(), False
+    try:
+        time.sleep(WARMUP_S)
+        prev = monitor.snapshot()
+        end = time.time() + minutes * 60
+        while time.time() < end:
+            time.sleep(grade.POLL_S)
+            cur = monitor.snapshot()
+            found = monitor.evaluate(prev, cur)
+            readings += 1
+            rules.update(a.rule for a in found)
+            if found and not in_alert:
+                alerts += 1
+            in_alert = bool(found)
+            prev = cur
+    finally:
+        traffic.kill()
+    row = {"utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "code_version": code_version(),
+           "orders_per_s": rate, "minutes": minutes, "readings": readings, "alerts": alerts,
+           "alerts_per_hour": round(alerts / (minutes / 60), 2), "rules": " ".join(f"{r}x{n}" for r, n in rules.items())}
+    append_row(FALSE_ALARMS, row, list(row))
+    print(f"false-alarm window: {minutes} min at {rate} orders/s -> {alerts} alert(s) in {readings} readings {dict(rules)}")
+    return row
+
+
 def finish() -> None:
     """Leave a clean, stopped service (also undoes a read-only DB from `unknown`)."""
     chaos.reset()
@@ -308,7 +404,7 @@ def finish() -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Nabd eval runner (see eval/PLAN.md)")
-    parser.add_argument("command", choices=["run", "check", "freeze"])
+    parser.add_argument("command", choices=["run", "check", "freeze", "falsealarm"])
     parser.add_argument("--set", default="dev", help="dev, heldout, or both: dev,heldout")
     parser.add_argument("--arms", default="nabd", help=f"comma-separated: {', '.join(arms.AGENT_ARMS + arms.BASELINE_ARMS)}")
     parser.add_argument("--variants", default="normal", help=f"comma-separated: {', '.join(scenarios.VARIANTS)}")
@@ -316,14 +412,19 @@ if __name__ == "__main__":
     parser.add_argument("--reps", type=int, default=3)
     parser.add_argument("--budget", type=float, default=20.0, help="stop agent runs once this much (USD) is spent")
     parser.add_argument("--out", type=Path, default=RESULTS)
+    parser.add_argument("--minutes", type=float, default=10, help="falsealarm: minutes at normal load")
+    parser.add_argument("--tag", default="nabd-frozen-v1", help="freeze: the git tag this freeze will get")
     args = parser.parse_args()
 
     if args.command == "freeze":
-        freeze()
+        freeze(args.tag)
         sys.exit(0)
     try:
         if args.command == "check":
             ok = harness_check()
+        elif args.command == "falsealarm":
+            ok = all(false_alarm_window(minutes, rate)["alerts"] == 0 for minutes, rate in
+                     ((args.minutes, scenarios.NORMAL_RATE), (args.minutes / 2, scenarios.HIGH_RATE)))
         else:
             run_matrix(args.set.split(","), args.arms.split(","), args.variants.split(","), args.reps,
                        [s for s in args.scenarios.split(",") if s], args.budget, args.out)
