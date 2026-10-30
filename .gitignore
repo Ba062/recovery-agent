@@ -219,3 +219,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 CLAUDE.md
+
+# Nabd runtime files (database, logs, pid)
+service/data/
+service/logs/

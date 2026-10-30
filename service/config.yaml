@@ -1,0 +1,5 @@
+version: v1.3
+payment_provider_url: internal://payments-v1
+queue_max: 1000
+worker_count: 1
+sync_interval_s: 5
