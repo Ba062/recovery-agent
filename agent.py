@@ -64,12 +64,21 @@ class Diagnosis(BaseModel):
     root_causes: list[str] = Field(description="Every distinct root cause found, most urgent first, one sentence each")
     evidence: list[str] = Field(description="Exact log lines / metric values / config entries supporting each cause")
     confidence: float = Field(ge=0, le=1, description="0-1 confidence in the root causes")
-    impact: str = Field(description="Business impact with numbers, e.g. '25 orders processed without payment; all 25 reprocessed'")
+    impact: str = Field(description="Business impact with numbers, e.g. '25 orders processed without payment; all 25 "
+                                    "reprocessed'. Money: quote money_impact figures EXACTLY as a tool reported them, "
+                                    "never estimate or calculate amounts yourself")
     actions_taken: list[str] = Field(description="Write actions actually applied, in order. Empty if none")
     recommended_actions: list[str] = Field(description="Fixes recommended but NOT applied (rejected, unavailable, or for a human). Empty if none")
     recovered: bool = Field(description="True only if check_invariants was green after your last fix")
     escalate: bool = Field(description="True if a human must take over")
     summary: str = Field(description="2-3 sentence incident summary for the on-call engineer")
+    # Filled in by code from the DB (via /business-metrics), never by the model: see CODE_FIELDS.
+    money_impact_before: dict | None = None
+    money_impact_after: dict | None = None
+
+
+CODE_FIELDS = {"money_impact_before", "money_impact_after"}
+MODEL_FIELDS = [name for name in Diagnosis.model_fields if name not in CODE_FIELDS]
 
 
 # ---------------------------------------------------------------- helpers
@@ -293,7 +302,8 @@ WRITE_TOOL_SCHEMAS = [
           "after the repair, so stop the cause first.", {"order_ids": _ids("all_flagged")}, ["order_ids"]),
 ]
 SUBMIT_TOOL = _tool("submit_diagnosis", "Submit your final structured diagnosis. Always finish by calling this.",
-                    Diagnosis.model_json_schema()["properties"], list(Diagnosis.model_fields))
+                    {name: prop for name, prop in Diagnosis.model_json_schema()["properties"].items()
+                     if name in MODEL_FIELDS}, MODEL_FIELDS)
 
 SYSTEM_PROMPT = """You are Nabd, an on-call SRE agent for an order-processing system.
 
@@ -318,7 +328,9 @@ How to work:
 5. Escalate (escalate=true) instead of guessing when: you are not confident in the cause, no
    available tool can fix it, a human rejected your action and there is no safe alternative,
    or the same fix has already failed.
-6. Always finish by calling submit_diagnosis, with numbers for the impact.
+6. Always finish by calling submit_diagnosis, with numbers for the impact. For money, quote the
+   money_impact figures from get_business_metrics or check_data_integrity exactly; never estimate
+   or calculate amounts yourself. Nabd adds the before/after money figures to the report itself.
 
 Write actions need human approval and may be rejected."""
 
@@ -376,6 +388,35 @@ def verify_recovery_claim(diagnosis: Diagnosis) -> tuple[Diagnosis, list[str]]:
     return diagnosis, still_broken
 
 
+def fetch_money_impact() -> dict | None:
+    """Money impact computed by the service from the DB. None if the service can't be read."""
+    try:
+        return requests.get(f"{SERVICE_URL}/business-metrics", timeout=5).json()["money_impact"]
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return None
+
+
+def describe_money(money: dict | None) -> str:
+    """One readable line, e.g. 'unpaid orders: 25 = 4,512.30 SAR (SAR 3,000.00, USD 403.28); ...'."""
+    if money is None:
+        return "unavailable (service unreachable)"
+    parts = []
+    for key, label in [("unpaid_orders", "unpaid orders"), ("queued_orders", "queued orders"),
+                       ("ledger_overstatement", "ledger overstated by")]:
+        m = money[key]
+        currencies = ", ".join(f"{cur} {amount:,.2f}" for cur, amount in m["by_currency"].items())
+        parts.append(f"{label}: {m['count']} = {m['total_sar']:,.2f} SAR" + (f" ({currencies})" if currencies else ""))
+    return "; ".join(parts)
+
+
+def attach_money_impact(diagnosis: Diagnosis, before: dict | None, after: dict | None) -> Diagnosis:
+    """Overwrite the money fields with figures from code, whatever the model sent, and add them to impact."""
+    diagnosis.money_impact_before, diagnosis.money_impact_after = before, after
+    diagnosis.impact += (f" [Nabd, computed from the DB (USD at 3.75 SAR) - at alert: {describe_money(before)}."
+                         f" At end of run: {describe_money(after)}.]")
+    return diagnosis
+
+
 def estimate_cost(stats: dict) -> float:
     return round((stats["input_tokens"] * PRICE_PER_MTOK["input"]
                   + stats["output_tokens"] * PRICE_PER_MTOK["output"]
@@ -399,6 +440,7 @@ def run_agent(alert: str,
               "stats": stats, "events": events}
     fix_counts: Counter = Counter()
     start = time.time()
+    money_before = fetch_money_impact()  # "before" = when Nabd picks up the alert
 
     def emit(kind: str, **data) -> None:
         event = {"t": round(time.time() - start, 1), "kind": kind, **data}
@@ -406,6 +448,7 @@ def run_agent(alert: str,
         on_event(kind, data)
 
     def finish(diagnosis: Diagnosis) -> tuple[Diagnosis, dict]:
+        diagnosis = attach_money_impact(diagnosis, money_before, fetch_money_impact())
         stats["seconds"] = round(time.time() - start, 1)
         stats["est_cost_usd"] = estimate_cost(stats)
         record["diagnosis"] = diagnosis.model_dump()

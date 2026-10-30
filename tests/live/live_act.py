@@ -12,7 +12,7 @@ import time
 import requests
 
 from live_common import (Results, inject_and_wait, pick_scenarios, reset, save, show_progress,
-                         skip_without_api_key, start_traffic, stop)
+                         skip_without_api_key, start_traffic, stop, unquoted_amounts)
 
 skip_without_api_key()
 import agent    # noqa: E402  (imported after the key check)
@@ -49,6 +49,16 @@ for scenario in pick_scenarios():
     results.check(f"{scenario}: system really back to green", not still_broken, str(still_broken))
     if scenario in ("payment_drop", "payment_drop_silent"):
         results.check(f"{scenario}: reverted the URL and reprocessed", {"set_config", "reprocess_orders"} <= set(writes), str(writes))
+    if scenario in ("payment_drop", "payment_drop_silent"):
+        before, after = diagnosis.money_impact_before, diagnosis.money_impact_after
+        results.check(f"{scenario}: code attached money before (unpaid > 0) and after (unpaid 0)",
+                      before is not None and before["unpaid_orders"]["total_sar"] > 0
+                      and after is not None and after["unpaid_orders"]["count"] == 0,
+                      f"before {before and before['unpaid_orders']}, after {after and after['unpaid_orders']}")
+        model_part = diagnosis.impact.split(" [Nabd, computed")[0]  # what the model wrote itself
+        made_up = unquoted_amounts(record, model_part)
+        results.check(f"{scenario}: every amount the model wrote was quoted from a tool, none estimated",
+                      not made_up, f"not seen in any tool result: {made_up}" if made_up else model_part[:200])
     if scenario == "payment_drop_silent":
         # No deploy is involved, so a rollback would be blaming the wrong change.
         results.check("payment_drop_silent: no rollback_deploy", "rollback_deploy" not in writes, str(writes))

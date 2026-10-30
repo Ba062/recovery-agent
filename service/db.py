@@ -140,6 +140,41 @@ def fix_ledger_entry(order_id: int) -> bool:
         return cur.rowcount == 1
 
 
+# ---------------------------------------------------------------- money impact
+# Computed here from the DB, never by the LLM. The API only accepts SAR and USD.
+RATES_TO_SAR = {"SAR": 1.0, "USD": 3.75}  # the riyal is pegged to the dollar at 3.75
+
+
+def sum_money(rows: list) -> dict:
+    """Sum (amount, currency) rows per currency, plus one total in SAR."""
+    by_currency: dict[str, float] = {}
+    for row in rows:
+        by_currency[row["currency"]] = by_currency.get(row["currency"], 0.0) + row["amount"]
+    total_sar = sum(amount * RATES_TO_SAR[cur] for cur, amount in by_currency.items())
+    return {"count": len(rows),
+            "by_currency": {cur: round(amount, 2) for cur, amount in sorted(by_currency.items())},
+            "total_sar": round(total_sar, 2)}
+
+
+def money_impact() -> dict:
+    """What each silent failure is costing right now, in money:
+    - unpaid_orders: processed but never charged (payment_drop)
+    - queued_orders: accepted but not processed yet, i.e. delayed (worker_hang).
+      A few in-flight orders are normal; a stuck or failed job also stays queued.
+    - ledger_overstatement: ledger amount minus real order amount, over mismatched rows (data_corruption)
+    """
+    with connect() as conn:
+        unpaid = conn.execute(
+            "SELECT o.amount, o.currency FROM orders o LEFT JOIN payments p ON p.order_id = o.id "
+            "WHERE o.status = 'processed' AND p.id IS NULL").fetchall()
+        queued = conn.execute("SELECT amount, currency FROM orders WHERE status = 'queued'").fetchall()
+        overstated = conn.execute(
+            "SELECT l.amount - o.amount AS amount, o.currency FROM ledger l JOIN orders o ON o.id = l.order_id "
+            "WHERE ABS(l.amount - o.amount) > 0.001").fetchall()
+    return {"unpaid_orders": sum_money(unpaid), "queued_orders": sum_money(queued),
+            "ledger_overstatement": sum_money(overstated), "rates_to_sar": RATES_TO_SAR}
+
+
 # ---------------------------------------------------------------- counts for /business-metrics
 def counts() -> dict:
     with connect() as conn:

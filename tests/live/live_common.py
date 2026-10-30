@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -107,6 +108,18 @@ def action_index(items: list[str], action: str) -> int | None:
         if main_action(item) == action:
             return i
     return None
+
+
+AMOUNT = re.compile(r"\d[\d,]*\.\d+")  # money-like numbers: 4626.54, 13,370.75
+
+
+def unquoted_amounts(record: dict, model_text: str) -> list[str]:
+    """Amounts the model wrote that it never saw in the alert or a tool result, i.e. estimated
+    or calculated by the model itself. Empty list = every figure was quoted."""
+    seen_text = record["alert"] + " ".join(e.get("text", "") for e in record["events"] if e["kind"] == "tool_result")
+    seen = {float(n.replace(",", "")) for n in AMOUNT.findall(seen_text)}
+    written = AMOUNT.findall(model_text)
+    return [n for n in written if not any(abs(float(n.replace(",", "")) - s) < 0.005 for s in seen)]
 
 
 class Results:

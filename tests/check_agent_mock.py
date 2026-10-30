@@ -21,6 +21,7 @@ fakes = {
 agent.TOOL_FUNCS.update(fakes)
 broken_now = []  # what the (fake) monitor reports when the agent claims recovery
 agent.monitor.check_once = lambda gap=3: [NS(rule=r) for r in broken_now]
+agent.fetch_money_impact = lambda: None  # no service in these checks; the money checks below replace this
 
 USAGE = NS(input_tokens=10, output_tokens=5, cache_read_input_tokens=100, cache_creation_input_tokens=None)
 
@@ -163,6 +164,32 @@ checks["a fix that ERRORS twice also counts as failed twice -> blocked + escalat
 script = [reply("tool_use", tool("read_logs", {}, i)) for i in range(agent.MAX_STEPS)]
 d, rec, sent = run(script)
 checks["step limit -> escalate"] = d.escalate and rec["stats"]["steps"] == agent.MAX_STEPS
+
+# ---- money impact comes from code (the DB), never from the model
+def money(unpaid_count, sar, usd):
+    zero = {"count": 0, "by_currency": {}, "total_sar": 0.0}
+    unpaid = {"count": unpaid_count, "by_currency": {"SAR": sar, "USD": usd}, "total_sar": round(sar + usd * 3.75, 2)}
+    return {"unpaid_orders": unpaid, "queued_orders": zero, "ledger_overstatement": zero, "rates_to_sar": {}}
+
+
+readings = [money(25, 3000.0, 403.28), money(0, 0.0, 0.0)]  # what the "service" reports: before, then after
+agent.fetch_money_impact = lambda: readings.pop(0)
+schema = agent.SUBMIT_TOOL["input_schema"]
+checks["submit_diagnosis schema has NO money fields (the model can't fill them)"] = (
+    not (agent.CODE_FIELDS & set(schema["properties"])) and not (agent.CODE_FIELDS & set(schema["required"]))
+    and "impact" in schema["required"])
+liar = dict(good, confidence=0.9, money_impact_before={"unpaid_orders": {"total_sar": 1}}, money_impact_after=None)
+d, rec, sent = run([reply("tool_use", tool("submit_diagnosis", liar, 1))])
+checks["model-supplied money is overwritten with the code's before/after figures"] = (
+    d.money_impact_before["unpaid_orders"]["total_sar"] == 4512.3 and d.money_impact_after["unpaid_orders"]["count"] == 0
+    and rec["diagnosis"]["money_impact_before"] == d.money_impact_before)
+checks["impact text gets the computed line (SAR total + per currency)"] = (
+    d.impact.startswith("25 orders unpaid") and "unpaid orders: 25 = 4,512.30 SAR (SAR 3,000.00, USD 403.28)" in d.impact
+    and "At end of run: unpaid orders: 0 = 0.00 SAR" in d.impact)
+readings[:] = [None, None]
+d, rec, sent = run([reply("refusal")])
+checks["service unreachable -> money marked unavailable, no crash (also on give-up path)"] = (
+    d.money_impact_before is None and "unavailable" in d.impact)
 
 for name, ok in checks.items():
     print(("PASS " if ok else "FAIL ") + name)

@@ -22,6 +22,7 @@ CHECKS = [
     "check_monitor.py",
     "check_serious_fixes.py",
     "check_minor_fixes.py",
+    "check_money.py",
 ]
 LIVE_CHECKS = ["live/live_diagnose.py", "live/live_act.py"]
 

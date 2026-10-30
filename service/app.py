@@ -105,7 +105,7 @@ def metrics():
 @app.get("/business-metrics")
 def business_metrics():
     """Business invariants: is the business actually working?"""
-    return {**db.counts(), **pipeline.stats()}
+    return {**db.counts(), **pipeline.stats(), "money_impact": db.money_impact()}
 
 
 @app.get("/config")
@@ -122,6 +122,7 @@ def data_integrity():
     return {
         "unpaid_processed_orders": {"count": len(unpaid), "sample_ids": unpaid[:10]},
         "ledger_mismatches": {"count": len(mismatched), "sample": db.ledger_mismatch_details(10)},
+        "money_impact": db.money_impact(),
     }
 
 
