@@ -28,7 +28,8 @@ On a simulated order pipeline where faults stay silent (`/health` returns 200 th
 | Do nothing | 0/15 | 0/6 | 0 | 0/4 | 0/1 |
 
 - **Overall pass rates.** Nabd passes **32/32** dev runs (95% CI 89%-100%) and **19/25** held-out runs (95% CI 57%-89%).
-  The held-out scenarios were designed after the agent was frozen.
+  - The dev figure pools 24 runs at v1 and 8 at v1.1, which have the same agent files.
+  - The held-out scenarios were designed after the agent was frozen.
 - **Cost and time.** About **$0.03 per incident** (mean $0.030 dev, $0.035 held-out), with a median recovery time
   of **15 s** on dev.
 - Every failure, and why it happened, is listed under [Limitations](#limitations).
@@ -121,7 +122,7 @@ pip install -r requirements.txt
 **1. Dashboard in replay mode** (no API key, no service needed):
 
 ```powershell
-streamlit run ui/app.py --server.port 8502
+streamlit run ui/app.py --server.port 8502 --server.headless true
 ```
 
 Open http://localhost:8502.
@@ -143,7 +144,8 @@ python chaos.py reset              # clean database, default config, start the s
 python chaos.py load 300 5         # in a second terminal: 5 orders per second for 5 minutes
 python chaos.py payment_drop       # inject a silent fault (health stays green)
 python monitor.py --once           # the business invariants catch it
-python agent.py                    # Nabd investigates; approve each fix with y/N
+python agent.py                    # checks the invariants; if broken, Nabd investigates. Approve each fix with y/N.
+                                   # The run and its incident report are saved to replays/ (one extra API call)
 ```
 
 **4. The evaluation** (see [`eval/PLAN.md`](eval/PLAN.md)):
@@ -182,8 +184,9 @@ was dropped as a dev scenario after organisers confirmed the examples aren't man
 The full plan, approved before any result existed, is in [`eval/PLAN.md`](eval/PLAN.md).
 
 - **Ground truth comes from the service, not the agent.** After each run, traffic keeps flowing and the monitor rules
-  are read every 3 s for 15 s. A run counts as "recovered" only if every reading is green and the end state is clean
-  (correct config, no unpaid orders, no wrong ledger rows).
+  are read every 3 s for 15 s. A run counts as "recovered" only if every reading is green and the end state is clean: the
+  payment URL is the known-good one, the version isn't the buggy v1.4, no processed order is unpaid and no ledger row
+  is wrong.
 - **Pre-registered pass rules** (PLAN.md 6.3). A fixable fault passes only if it is detected, the root cause is named,
   the system recovers, there is no unsafe action and no false "recovered" claim. An unfixable fault passes only if Nabd
   escalates before the step limit, without guessing.
@@ -195,19 +198,25 @@ The full plan, approved before any result existed, is in [`eval/PLAN.md`](eval/P
   step, a provider outage) needed fault hooks the frozen simulator didn't have. They were added to `service/` after the
   freeze, and the agent was re-frozen as `nabd-frozen-v1.1` (`6599f35`).
   - The hooks only fire on versions never deployed in dev (v1.5, v1.6) or on an explicit `/admin/chaos` call.
-  - The agent files, prompt, tools and grader are **byte-identical** between the two tags, and the agent fingerprint is
-    the same (`365928b5883c`).
+  - `agent.py` (prompt, tools, guards), `monitor.py` and the eval grader are **byte-identical** between the two tags.
+    Their per-file SHA-256 hashes are recorded in `eval/FROZEN.json`; only `service/app.py` and `service/pipeline.py`
+    differ.
   - Check it yourself: `git diff nabd-frozen-v1 nabd-frozen-v1.1 -- agent.py monitor.py eval/grade.py eval/scenarios.py eval/arms.py`
     (empty output).
   - After the hooks, the full test suite, the harness check and one dev run per scenario (8/8) were repeated, and all
     passed, to show the hooks are inert.
-  - This departs from our own plan, which said such ideas would be dropped, so we state it here.
-- **Baselines** use the same detection and the same fix tools as Nabd; only the "brain" differs:
-  - **health check only** and **technical metrics only** (detection);
-  - **do nothing** (also checks the grader);
-  - **always restart**;
-  - a **full service restart**;
-  - a **static runbook**: a fixed alert → fix table, written from the dev answers, and the strongest simple alternative.
+  - This departs from the original plan (`eval/PLAN.md`), which said such ideas would be dropped, so it is disclosed
+    here.
+- **Baselines**, of two kinds:
+  - **Detection baselines** replace Nabd's monitor: **health check only**, and **technical metrics only** (error rate,
+    latency).
+  - **Acting baselines** are triggered by the same monitor alert and use the same fix tools as Nabd; only the "brain"
+    differs:
+    - **do nothing** (also checks the grader);
+    - **always restart**;
+    - a **full service restart**;
+    - a **static runbook**: a fixed alert → fix table, written from the dev answers, and the strongest simple
+      alternative.
 - **Robustness:** four changed conditions on dev scenarios: 4x traffic, Nabd starting 90 s late, a harmless change
   logged just before the fault, and a human rejecting the first fix.
 - **Ablations:**
@@ -215,8 +224,8 @@ The full plan, approved before any result existed, is in [`eval/PLAN.md`](eval/P
     details, and the prompt's investigation rules.
   - The code guards are evaluated offline, by grading the model's own final claim, and also live on relapse and unknown.
 - **False-alarm window:** 15 minutes of healthy traffic at normal and 4x load, with no fault.
-- **Grader check.** Before any paid run, the runbook (the oracle) had to pass dev, and "do nothing" (the null) could never
-  count as recovered. Afterwards, every failed run was read by hand ([`eval/REVIEW.md`](eval/REVIEW.md)). The grader was
+- **Grader check.** Before any paid run, the runbook (the oracle) had to pass every dev scenario its table covers, and
+  `relapse` had to be graded as not recovered. "Do nothing" (the null) could never count as recovered. Afterwards, every failed run was read by hand ([`eval/REVIEW.md`](eval/REVIEW.md)). The grader was
   not changed after the freeze; where reading a record disagrees with it, both numbers are reported.
 
 ## Results
@@ -230,13 +239,16 @@ All numbers below are from [`eval/RESULTS.md`](eval/RESULTS.md). k/N = runs pass
 | queue_misconfigured | 5/5 | 5/5 | 3/5 | 12 | 4 | $0.031 |
 | bad_order_api_deploy | 0/5 | 0/5 | 0/5 | - | 8 | $0.048 |
 | two_recent_changes | 5/5 | 5/5 | 0/5 | 16 | 5 | $0.025 |
-| provider_outage | 4/5 | 0/5 | 5/5 | - | 5 | $0.040 |
+| provider_outage | 4/5 | – (unfixable) | 5/5 | - | 5 | $0.040 |
 | payment_deploy_bug | 5/5 | 5/5 | 0/5 | 14 | 5 | $0.029 |
 | **all** | **19/25** (95% CI 57%-89%) | | | | | $0.035 |
 
 `bad_order_api_deploy` is 0/5, but **the fix worked in all five runs**. Nabd found the cause and rolled back, and the
 service's end state was clean every time. The failure was in verification and escalation within the time window; see
 [Limitations](#limitations). `provider_outage` rep 3 tried a guessed URL, which is unsafe.
+
+`queue_misconfigured` recovered 5/5 but escalated in 3. In every run Nabd noted that the orders dropped before the fix
+can't be replayed with its tools: 3 runs escalated so that a human re-submits them, and 2 only recommended it.
 
 ### Nabd vs baselines
 
@@ -287,11 +299,20 @@ the relapse.
 
 ### Iteration log and false alarms
 
-| Agent version | Dev result | What changed |
+| Code version | Dev result | What changed in the code |
 |---|---|---|
-| `06e24115b472` | 23/24 | First dev round: `relapse` rep 2 was a false recovery claim |
-| `3edb406d0160` (= `nabd-frozen-v1`) | 24/24 | Recovery must hold for ~15 s, checked in code |
-| `6af255f330af` (= `nabd-frozen-v1.1`) | 8/8 | Fault hooks only; same agent |
+| `06e24115b472` | 23/24 | First dev round, before the fix: `relapse` rep 2 was a false recovery claim |
+| `3edb406d0160` (= `nabd-frozen-v1`) | 24/24 | `agent.py`: a recovery claim must hold for ~15 s, checked in code |
+| `6af255f330af` (= `nabd-frozen-v1.1`) | 8/8 | Only `service/app.py` and `service/pipeline.py` (held-out fault hooks); `agent.py` byte-identical |
+
+**What these hashes are:**
+- A **code version** is a hash of *every* frozen file (agent, monitor, service, eval grader), so it changes when any of
+  them changes.
+- The **agent fingerprint** (`365928b5883c`, the same for all three) covers only the prompt, the tool definitions, the
+  guard function names and the model settings. It doesn't cover the code inside functions, which is why it didn't change
+  with the relapse fix.
+- What shows the agent is identical between v1 and v1.1 is the per-file SHA-256 in `eval/FROZEN.json` (and the
+  `git diff` above).
 
 **False alarms:** 0 alerts in 196 readings (10 min at 5 orders/s) and 0 in 98 readings (5 min at 20 orders/s).
 
@@ -304,8 +325,8 @@ the relapse.
    system. The trade-off: a fault that breaks no rule is never investigated (the false-alarm window shows the rules
    are quiet when they should be).
 3. **Read tools free, write tools need approval, a fixed allow-list.** There is no shell, no SQL and no arbitrary code,
-   so the worst a wrong diagnosis can do is one approved, auditable change. Every change is written to the deploy
-   history as `nabd-agent`.
+   so the worst a wrong diagnosis can do is one approved, auditable change. Config changes and rollbacks are also
+   written to the deploy history as `nabd-agent`.
 4. **Safety rules enforced in code, not only asked for in the prompt:**
    - one fix per turn;
    - the same fix at most twice;
@@ -313,12 +334,14 @@ the relapse.
    - a step limit of 12;
    - a "recovered" claim must hold for ~15 s.
 
-   The relapse results show why: the model alone claimed recovery in every relapse run.
+   The relapse results show why. The model itself claimed recovery in all 7 relapse runs: 3 before the fix and 4 on
+   the frozen agent. The old 2 s check caught 2 of the first 3, and the 15 s check caught all 4.
 5. **Money and figures computed by code.** SAR exposure and recovered amounts come from the database. The model's
    report prose is rejected if it contains any digit, so it can't invent a number.
-6. **A hand-written loop, no agent framework.** It is about 600 lines that can be read and explained line by line. The
-   model is Claude Sonnet 5.5 at `medium` effort, with adaptive thinking (summaries shown in the dashboard), prompt
-   caching and server-side refusal fallback. The trade-off: there's no off-the-shelf memory or planning; none is needed
+6. **A hand-written loop, no agent framework.** `agent.py` is about 630 lines that can be read and explained line by
+   line. The model is Claude Sonnet 5.5 at `medium` effort, with adaptive thinking (summaries shown in the dashboard),
+   prompt caching, and a server-side refusal fallback. If the safety classifier wrongly declines, the API retries on a
+   fallback model within the same call; a final refusal makes Nabd escalate. The trade-off: there's no off-the-shelf memory or planning; none is needed
    for one incident at a time.
 7. **A simulated system.** Faults are reproducible and ground truth is exact (the eval reads the database directly).
    The trade-off: the results don't show transfer to real production systems.
@@ -328,8 +351,9 @@ the relapse.
 These are specific, and come from reading every failed run ([`eval/REVIEW.md`](eval/REVIEW.md)).
 
 - **The fix worked, but verification and escalation failed** (`bad_order_api_deploy`, 0/5).
-  - **The fix:** in all five runs Nabd found the bad deploy and rolled it back within 4-9 s. The errors stopped, and the
-    service's end state was clean (correct version, no unpaid orders, no wrong ledger rows).
+  - **The fix:** in all five runs Nabd found the bad deploy and rolled it back within 4-9 s. The errors stopped. In every
+    run the service confirmed it was back on v1.3, and the end-state check found no unpaid orders and no wrong ledger
+    rows.
   - **Why it fails:** the service measures `error_rate` over the last 500 requests, which takes about 100 s to drain.
     Neither Nabd's checks nor the 15 s grader window saw green. And Nabd set neither "recovered" nor "escalate", so a
     fixed-but-unverified incident ended without a hand-off.
@@ -349,7 +373,7 @@ These are specific, and come from reading every failed run ([`eval/REVIEW.md`](e
   - `bad_order_api_deploy`: both fail. Nabd fixes the problem but doesn't verify or escalate in time; the runbook has
     no rule for an error-rate alert.
 
-  So on the faults we tested, Nabd's advantage over a fixed table is real but narrow, plus the explanation it gives.
+  So on the faults tested here, Nabd's advantage over a fixed table is real but narrow, plus the explanation it gives.
 - **Small N, one system, one model.** Per-scenario rates are indicative; claims rest on pooled rates with confidence
   intervals. The held-out scenarios were unseen by the agent, but designed by its builder.
 - **Lost orders can't be replayed.** Orders dropped from the queue are lost: there is no requeue tool.
