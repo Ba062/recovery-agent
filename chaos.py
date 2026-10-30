@@ -66,9 +66,15 @@ def worker_hang() -> str:
     return "worker_hang injected: worker is blocked (run `chaos.py load` to watch the queue grow)"
 
 
-def compound() -> str:
-    """'Multiple issues at once': both faults together."""
-    return payment_drop() + "\n" + worker_hang()
+def compound(gap_seconds: float = 5) -> str:
+    """'Multiple issues at once': payment_drop, then worker_hang a few seconds later.
+
+    The gap lets some orders get processed with the bad URL first (with `load` running),
+    so both signals are visible: unpaid orders AND a stalled worker with a growing queue.
+    """
+    first = payment_drop()
+    time.sleep(gap_seconds)
+    return first + "\n" + worker_hang()
 
 
 def unknown() -> str:
