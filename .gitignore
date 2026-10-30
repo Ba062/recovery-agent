@@ -227,3 +227,6 @@ service/logs/
 service/config.yaml
 service/deploys.jsonl
 service/config.yaml.tmp
+
+# live test run records
+tests/live/output/
