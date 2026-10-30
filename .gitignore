@@ -233,3 +233,6 @@ tests/live/output/
 
 # Eval: full per-run records (large); results CSVs and RESULTS.md are committed
 eval/runs/
+
+# Live mode (dashboard): records + reports of live runs
+live_runs/
