@@ -45,8 +45,11 @@ for scenario in pick_scenarios():
         results.check("unknown: escalates instead of claiming recovery", diagnosis.escalate and not diagnosis.recovered)
         continue
     results.check(f"{scenario}: system really back to green", not still_broken, str(still_broken))
-    if scenario == "payment_drop":
-        results.check("payment_drop: reverted the URL and reprocessed", {"set_config", "reprocess_orders"} <= set(writes), str(writes))
+    if scenario in ("payment_drop", "payment_drop_silent"):
+        results.check(f"{scenario}: reverted the URL and reprocessed", {"set_config", "reprocess_orders"} <= set(writes), str(writes))
+    if scenario == "payment_drop_silent":
+        # No deploy is involved, so a rollback would be blaming the wrong change.
+        results.check("payment_drop_silent: no rollback_deploy", "rollback_deploy" not in writes, str(writes))
     elif scenario == "worker_hang":
         results.check("worker_hang: restarted the worker", "restart_worker" in writes, str(writes))
     elif scenario == "compound":

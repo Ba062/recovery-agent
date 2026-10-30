@@ -3,7 +3,8 @@
 Usage:
     python chaos.py load [seconds] [orders_per_second]   keep orders flowing (run in a 2nd terminal)
     python chaos.py payment_drop     bad payment provider URL   -> orders silently go unpaid
-    python chaos.py worker_hang      worker blocks forever       -> queue silently grows
+    python chaos.py payment_drop_silent  same, but edited by hand: no deploy-history entry
+    python chaos.py worker_hang     worker blocks forever       -> queue silently grows
     python chaos.py compound         payment_drop + worker_hang at once
     python chaos.py unknown          DB file made read-only      -> no tool can fix it, must escalate
     python chaos.py reset            stop service, wipe DB + logs, restore default config, start again
@@ -82,6 +83,16 @@ def payment_drop() -> str:
     return f"payment_drop injected: payment_provider_url {old} -> {BAD_PROVIDER_URL}"
 
 
+def payment_drop_silent() -> str:
+    """payment_drop, but someone edited config.yaml by hand: NO deploy-history entry.
+
+    recent_changes shows nothing new, so Nabd has to find the cause from the DEBUG logs
+    and the live config instead of just reading the change history.
+    """
+    old = set_config("payment_provider_url", BAD_PROVIDER_URL)
+    return f"payment_drop_silent injected: payment_provider_url {old} -> {BAD_PROVIDER_URL} (not in deploy history)"
+
+
 def worker_hang() -> str:
     """Official example 4: the worker freezes. No config change, no deploy: only metrics show it."""
     require_service()
@@ -148,7 +159,7 @@ def load(seconds: float = 60, rate: float = 5) -> None:
     print(f"load done: {sent} orders sent, {failed} failed")
 
 
-FAULTS = {"payment_drop": payment_drop, "worker_hang": worker_hang, "compound": compound,
+FAULTS = {"payment_drop": payment_drop, "payment_drop_silent": payment_drop_silent, "worker_hang": worker_hang, "compound": compound,
           "unknown": unknown, "reset": reset}
 
 USAGE = f"usage: python chaos.py load [seconds] [orders_per_second] | {' | '.join(FAULTS)}"

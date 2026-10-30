@@ -31,11 +31,15 @@ for scenario in pick_scenarios():
 
     results.check(f"{scenario}: changed nothing (recommend mode)",
                   not record["stats"]["writes_applied"] and not diagnosis.actions_taken and not diagnosis.recovered)
-    if scenario == "payment_drop":
-        results.check("payment_drop: blames the payment provider URL change", mentions(causes, "payment_provider_url", "payments-v2"))
+    if scenario in ("payment_drop", "payment_drop_silent"):
+        results.check(f"{scenario}: blames the payment provider URL change", mentions(causes, "payment_provider_url", "payments-v2"))
         url, reprocess = action_index(recs, "url_fix"), action_index(recs, "reprocess")
-        results.check("payment_drop: recommends reverting the URL, then reprocessing",
+        results.check(f"{scenario}: recommends reverting the URL, then reprocessing",
                       url is not None and reprocess is not None and url < reprocess, f"url {url}, reprocess {reprocess}")
+    if scenario == "payment_drop_silent":
+        # No deploy is involved, so a rollback would be blaming the wrong change.
+        results.check("payment_drop_silent: does not recommend a rollback",
+                      action_index(recs, "rollback") is None, str([r[:60] for r in recs]))
     elif scenario == "worker_hang":
         results.check("worker_hang: identifies the stuck worker", mentions(causes, "worker"))
         restart = action_index(recs, "restart")

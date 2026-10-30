@@ -96,6 +96,24 @@ check("deploy history records the change", "payment_provider_url" in last["chang
 code, out = run("chaos.py", "payment_drop")
 check("injecting payment_drop twice doesn't crash", code == 0, out)
 
+print("\n--- payment_drop_silent (config edited by hand, no deploy entry)")
+run("chaos.py", "reset")
+load(3)
+run("chaos.py", "payment_drop_silent")
+time.sleep(3)
+load(6)
+m = bm()
+check("health stays green", health_ok())
+check("orders go unpaid", m["orders_without_payment"] > 10, f"{m['orders_without_payment']} of {m['orders_created']}")
+check("deploy history NOT changed", deploys.read_text(encoding="utf-8") == default_deploys)
+# The evidence Nabd has to find instead: the DEBUG failure and the service's own reload log.
+log_lines = [json.loads(line) for line in (ROOT / "service" / "logs" / "app.jsonl").read_text(encoding="utf-8").splitlines()]
+check("DEBUG log names the bad URL", any(r["level"] == "DEBUG" and "payments-v2" in r["msg"] for r in log_lines))
+reloads = [r for r in log_lines if r["msg"] == "config reloaded" and "payment_provider_url" in r.get("changed", {})]
+check("config reload log shows old -> new URL",
+      bool(reloads) and reloads[-1]["changed"]["payment_provider_url"] == {"old": "internal://payments-v1", "new": "internal://payments-v2"},
+      str(reloads[-1]["changed"]) if reloads else "no reload line")
+
 print("\n--- worker_hang")
 run("chaos.py", "reset")
 load(2)
