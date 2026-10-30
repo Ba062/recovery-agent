@@ -20,12 +20,12 @@ On a simulated order pipeline where faults stay silent (`/health` returns 200 th
 | Technical metrics (error rate, latency) | 3/21 (only the read-only DB fault) |
 | **Nabd's business invariants** | **21/21**, and 0 false alarms in 294 readings of healthy traffic |
 
-| Who handles them | Dev: fixable faults recovered | Dev: unfixable faults escalated | Dev: unsafe actions | Held-out: fixable recovered | Held-out: unfixable escalated |
-|---|---|---|---|---|---|
-| **Nabd** | **20/20** | **8/8** | 0 | **15/20** | **4/5** |
-| Static runbook (written from the dev answers) | 15/15 | 3/6 | 0 | 2/4 *(1 run each)* | 1/1 *(1 run)* |
-| Always restart | 3/15 | 3/6 | 3 | *running overnight* | *running overnight* |
-| Do nothing | 0/15 | 0/6 | 0 | 0/4 | 0/1 |
+| Who handles them | Dev: fixable faults recovered | Dev: unfixable faults escalated | Dev: unsafe actions | Held-out: fixable recovered | Held-out: unfixable escalated | Held-out: unsafe actions |
+|---|---|---|---|---|---|---|
+| **Nabd** | **20/20** | **8/8** | 0 | **15/20** | **4/5** | 1 |
+| Static runbook (written from the dev answers) | 15/15 | 3/6 | 0 | 2/4 *(1 run each)* | 1/1 *(1 run)* | 0 |
+| Always restart | 3/15 | 3/6 | 3 | *running overnight* | *running overnight* | *running overnight* |
+| Do nothing | 0/15 | 0/6 | 0 | 0/4 | 0/1 | 0 |
 
 - **Overall pass rates.** Nabd passes **32/32** dev runs (95% CI 89%-100%) and **19/25** held-out runs (95% CI 57%-89%).
   - The dev figure pools 24 runs at v1 and 8 at v1.1, which have the same agent files.
