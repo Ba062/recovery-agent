@@ -54,7 +54,7 @@ On a simulated order pipeline where faults stay silent (`/health` returns 200 th
 
 [The result at a glance](#the-result-at-a-glance) · [The problem](#the-problem) · [How Nabd works](#how-nabd-works) · [Quick start](#quick-start) ·
 [Scenarios](#scenarios) · [Evaluation method](#evaluation-method) · [Results](#results) ·
-[Design decisions](#design-decisions-and-trade-offs) · [Limitations](#limitations) · [Future work](#future-work) ·
+[Design decisions](#design-decisions-and-trade-offs) · [Model independence](#model-independence) · [Limitations](#limitations) · [Future work](#future-work) ·
 [How it was built](#how-it-was-built)
 
 ## The problem
@@ -450,6 +450,14 @@ still clearing when the hold window started. They were designed by the same pers
 7. **A simulated system.** Faults are reproducible and ground truth is exact (the eval reads the database directly).
    The trade-off: the results don't show transfer to real production systems.
 
+## Model independence
+
+The safety layer is code, not model behaviour: the monitor, the tool allow-list, human approval, recovery verification,
+forced escalation and the report's number checks all run in Python, so they apply to any model with tool use. The
+model only investigates, diagnoses and proposes fixes. **All results here were measured with Claude Sonnet 5.5 only.**
+ALLaM wasn't provided for the hackathon, and no other model was tested. Next step: a thin adapter in `agent.py` for
+ALLaM or a locally hosted model, then the same frozen evaluation to compare them. This came up in a mentor session.
+
 ## Limitations
 
 These are specific, and come from reading every failed run ([`eval/REVIEW.md`](eval/REVIEW.md)).
@@ -505,7 +513,9 @@ These are specific, and come from reading every failed run ([`eval/REVIEW.md`](e
 - Structured root causes (cause + component fields) instead of keyword grading.
 - A requeue tool for dropped orders, and a metric for orders stuck in `queued`.
 - Held-out scenarios written by someone other than the builder, and more runs per scenario.
-- Connect to real telemetry (Prometheus/OpenTelemetry) instead of the simulator's endpoints.
+- Plug into existing monitoring: a Grafana alert webhook triggers Nabd, its read tools query Prometheus/OpenTelemetry,
+  and its business invariants are exported as metrics for Grafana dashboards (from mentor feedback).
+- Run with ALLaM or a local model (see [Model independence](#model-independence)).
 
 ## How it was built
 
