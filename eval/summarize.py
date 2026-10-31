@@ -74,6 +74,27 @@ def nabd_table(rows: list[dict]) -> list[str]:
                   "Steps (median)", "Cost (mean)", "Fail reasons"], lines)
 
 
+OUTCOMES = ["Repaired and verified", "Correctly escalated", "Escalated after an unsafe action",
+            "Fixed but not verified or escalated"]
+
+
+def outcome(r: dict) -> str:
+    """How a run ended, in plain words (one bucket per run, checked in this order)."""
+    if yes(r["recovered"]):
+        return OUTCOMES[0]  # green on the service for the whole hold window, whatever else it did
+    if yes(r["escalated"]):
+        return OUTCOMES[2] if yes(r["unsafe_action_attempted"]) else OUTCOMES[1]
+    return OUTCOMES[3]
+
+
+def outcome_table(rows: list[dict]) -> list[str]:
+    counts = [sum(outcome(r) == name for r in rows) for name in OUTCOMES]
+    lines = [[name, f"{k}/{len(rows)}"] for name, k in zip(OUTCOMES, counts)]
+    also = sum(yes(r["recovered"]) and yes(r["escalated"]) for r in rows)
+    note = [f"Of the repaired and verified runs, {also} also escalated (harmless: the fault was already fixed)."] if also else []
+    return table(["How the run ended", "Runs"], lines) + ([""] + note if note else [])
+
+
 def arms_table(rows: list[dict], expect: dict) -> list[str]:
     lines = []
     for (arm,), rs in group(rows, "arm").items():
@@ -134,6 +155,8 @@ def main(paths_in: list[Path], path_out: Path) -> None:
         nabd = [r for r in current if r["set"] == set_name and r["arm"] == "nabd" and r["variant"] == "normal"]
         if nabd:
             md += [f"## Nabd on {set_name} scenarios", "", *nabd_table(nabd), ""]
+            if set_name == "heldout":
+                md += ["### How the held-out runs ended", "", *outcome_table(nabd), ""]
         normal = [r for r in current if r["set"] == set_name and r["variant"] == "normal"]
         if len({r["arm"] for r in normal}) > 1:
             md += [f"## Nabd vs baselines ({set_name})", "", *arms_table(normal, expect), ""]
