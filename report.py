@@ -162,6 +162,8 @@ LABELS = {
         "recovered_ledger": "Recovered: ledger overstatement corrected", "currency": "SAR",
         "follow_ups": "Follow-ups",
         "no_prose": "(Prose unavailable: the model's text failed validation. The figures above are complete.)",
+        "prose_skipped": "(Prose unavailable: none was requested for this run; eval runs skip it to save cost. "
+                         "The figures above are complete.)",
         "footer": "All figures are inserted by code from the run record (USD converted at the peg of "
                   "{rate} SAR). The prose is written by Claude and contains no figures of its own.",
     },
@@ -182,6 +184,8 @@ LABELS = {
         "recovered_ledger": "المسترد: تصحيح المبالغ الزائدة في دفتر الأستاذ", "currency": "ريال",
         "follow_ups": "إجراءات المتابعة",
         "no_prose": "(النص غير متاح: لم يجتز نص النموذج التحقق. الأرقام أعلاه مكتملة.)",
+        "prose_skipped": "(النص غير متاح: لم يُطلب نص من النموذج لهذا التشغيل، إذ تتخطاه تشغيلات التقييم توفيرًا "
+                         "للتكلفة. الأرقام أعلاه مكتملة.)",
         "footer": "جميع الأرقام مُدرجة آليًا من سجل التشغيل (تحويل الدولار بسعر الربط {rate} ريال). "
                   "النص من صياغة Claude ولا يحتوي على أي أرقام من عنده.",
     },
@@ -219,9 +223,11 @@ def render(record: dict, prose: dict | None, lang: str) -> str:
     else:
         outcome = L["recovered"] if d["recovered"] else L["escalated"] if d["escalate"] else L["not_recovered"]
     p = prose[lang] if prose else None
+    # No prose: asked for but unusable (save() records the attempt in record["report"]), or never asked for (eval runs).
+    no_prose = L["no_prose"] if record.get("report") else L["prose_skipped"]
 
     def section(key: str) -> list[str]:
-        return [fill(plain(p[key]), f, lang) if p else L["no_prose"], ""]
+        return [fill(plain(p[key]), f, lang) if p else no_prose, ""]
 
     def count(name: str) -> str:
         """A count in a table: with its noun in Arabic ("38 طلبًا"), bare in English (the header says what)."""
@@ -257,7 +263,7 @@ def render(record: dict, prose: dict | None, lang: str) -> str:
                 f"| {L['recovered_paid']} | {count('recovered_paid_count')} ({f['recovered_paid_sar']} {cur}) |",
                 f"| {L['recovered_ledger']} | {count('recovered_ledger_count')} ({f['recovered_ledger_sar']} {cur}) |"]
     out += ["", *section("impact_note"), f"## {L['follow_ups']}", ""]
-    out += [f"- {fill(plain(item), f, lang)}" for item in as_items(p["follow_ups"])] if p else [L["no_prose"]]
+    out += [f"- {fill(plain(item), f, lang)}" for item in as_items(p["follow_ups"])] if p else [no_prose]
     out += ["", "---", "", f"_{L['footer'].format(rate=f['usd_to_sar'])}_"]
     text = "\n".join(out)
     # Blank lines around the div so Markdown inside it still renders (GitHub, VS Code).

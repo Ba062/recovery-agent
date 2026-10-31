@@ -233,11 +233,17 @@ checks["tool schema is flat: every en_/ar_ field required"] = (
 for name, replies in [("both attempts bad", (bad, bad)), ("API error", (RuntimeError("API down"),))]:
     client, _ = fake_client(*replies)
     prose, stats = report.write_prose(RECORD, client)
-    versions = report.build(RECORD, prose)
+    versions = report.build({**RECORD, "report": {"prose_used": False, **stats}}, prose)  # as save() records it
     checks[f"{name} -> no model prose, figures still complete in both"] = (
         prose is None and all(report.LABELS[lang]["no_prose"] in versions[lang] for lang in ("en", "ar"))
         and all(v in versions[lang] for v in EXPECTED for lang in ("en", "ar"))
         and "About 40" not in versions["en"])
+
+# ---- 3b. prose never requested (eval runs skip it): says so, not that the model's text failed validation
+versions = report.build(RECORD, None)
+checks["prose never requested -> 'none was requested' label, not 'failed validation'"] = all(
+    report.LABELS[lang]["prose_skipped"] in versions[lang] and report.LABELS[lang]["no_prose"] not in versions[lang]
+    and all(v in versions[lang] for v in EXPECTED) for lang in ("en", "ar"))
 
 # ---- 4. save writes one Markdown file with both versions, records report stats
 with tempfile.TemporaryDirectory() as tmp:

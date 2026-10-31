@@ -233,3 +233,7 @@ tests/live/output/
 
 # Live mode (dashboard): records + reports of live runs
 live_runs/
+
+# CLI runs: `python agent.py` saves <time>_<mode>.json + .report.md next to the 10 curated showcase replays
+replays/*_act.*
+replays/*_recommend.*
