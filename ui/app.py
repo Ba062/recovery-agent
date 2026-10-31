@@ -31,6 +31,12 @@ FROZEN_JSON = ROOT / "eval" / "FROZEN.json"
 WRITE_TOOLS = {"set_config", "rollback_deploy", "restart_worker", "reprocess_orders", "repair_ledger"}
 TAGLINE = "Health checks say everything is fine. Nabd checks whether the business is actually working."
 PLAY_SECONDS = 1.0  # "Play from the start": about one event per second
+RTL_START = '<div dir="rtl">'  # the Arabic report starts with this (report.render(..., "ar"))
+# Streamlit styles markdown for left-to-right text: its containers set text-align: left (the Arabic report's
+# <div dir="rtl"> inherits it, so headings and text stay on the left while tables move right) and list items are
+# indented on the left. Align to the start (= right, in Arabic) and mirror Streamlit's list indent.
+RTL_STYLE = ("<style>div[dir='rtl'] { text-align: start; } "
+             "div[dir='rtl'] li { margin: 0.2em 1.15em 0.2em 0; padding: 0 0.3em 0 0; }</style>\n\n")
 
 # What each read tool does, in plain words (shown instead of the tool name).
 READS = {
@@ -316,7 +322,9 @@ def eval_verdict(row: dict) -> None:
 def report_tab(path: Path, record: dict) -> None:
     saved = path.with_suffix(".report.md")
     if saved.exists():  # a report saved next to the record (English, ---, Arabic)
-        english, _, arabic = saved.read_text(encoding="utf-8").partition("\n\n---\n\n")
+        # Split where the Arabic starts: each language also has a --- of its own, above its footer.
+        english, _, arabic = saved.read_text(encoding="utf-8").partition("\n\n---\n\n" + RTL_START)
+        arabic = RTL_START + arabic
     else:
         prose = (record.get("report") or {}).get("prose")
         if not prose:
@@ -325,7 +333,7 @@ def report_tab(path: Path, record: dict) -> None:
         english, arabic = report.render(record, prose, "en"), report.render(record, prose, "ar")
     en, ar = st.tabs(["English", "العربية"])
     en.markdown(english, unsafe_allow_html=True)
-    ar.markdown(arabic, unsafe_allow_html=True)  # keeps <div dir="rtl"> and <span dir="ltr">
+    ar.markdown(RTL_STYLE + arabic, unsafe_allow_html=True)  # keeps <div dir="rtl"> and <span dir="ltr">
 
 
 # ---------------------------------------------------------------- 8. evaluation headline

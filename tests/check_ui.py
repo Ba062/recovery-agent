@@ -92,6 +92,13 @@ else:
           labels[:3] == ["SAR at risk", "SAR recovered", "Orders delayed (queued)"], str(labels[:4]))
     check("tagline shown", any("business is actually working" in c for c in texts(at, "caption")))
     check("Arabic report keeps its right-to-left markup", any('dir="rtl"' in m for m in texts(at, "markdown")))
+    arabic = [m for m in texts(at, "markdown") if 'dir="rtl"' in m]
+    english = [m for m in texts(at, "markdown") if m.startswith("# Incident report")]
+    check("Arabic report aligned right (Streamlit's markdown is left-aligned)",
+          bool(arabic) and "text-align: start" in arabic[0])
+    check("saved report split between the languages: English keeps its footer, no English above the Arabic",
+          bool(english) and "All figures are inserted by code" in english[0]
+          and bool(arabic) and "All figures are inserted by code" not in arabic[0])
 
     # ---- 4. Play from the start: animates into an auto-scrolling container with a progress bar
     shortest = min(range(len(names)), key=lambda i: len(names[i]) if "ealthy" in names[i] else 99)
