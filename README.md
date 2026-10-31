@@ -19,7 +19,7 @@ Health checks say everything is fine. Nabd checks whether the business is actual
 
 ![Nabd dashboard, compound incident replay: health check passing while the business invariants are broken; Nabd fixes it and verifies](docs/dashboard.png)
 
-**Demo video (3 min):** *PLACEHOLDER: YouTube link (unlisted)*
+**Demo video (3 min):** [youtu.be/P0nt1E9wGaI](https://youtu.be/P0nt1E9wGaI)
 
 ## The result at a glance
 
