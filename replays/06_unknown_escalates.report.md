@@ -6,7 +6,7 @@
 | Outcome | Escalated to a human |
 | Duration | 11.8 s |
 | Agent steps | 3 |
-| Confidence | 0.70 |
+| Confidence (model's self-assessment) | 70% |
 
 ## What happened
 
@@ -22,7 +22,7 @@ The database is rejecting writes with "attempt to write a readonly database", wh
 - Logs: `1x [INFO] pipeline: pipeline started`
 - Logs: `1x [ERROR] sync: ledger sync failed: attempt to write a readonly database`
 
-The logs show repeated read-only write errors on /orders and one from the ledger sync. The configuration is unchanged (v1.3) and its last change does not match when the errors began, so a config fault is unlikely. Business checks show accepted orders and payments still match. Confidence in this diagnosis is 0.70.
+The logs show repeated read-only write errors on /orders and one from the ledger sync. The configuration is unchanged (v1.3) and its last change does not match when the errors began, so a config fault is unlikely. Business checks show accepted orders and payments still match. Confidence in this diagnosis is 70%.
 
 ## Actions taken
 
@@ -65,7 +65,7 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 | النتيجة | تم التصعيد إلى مهندس بشري |
 | المدة | 11.8 ثانية |
 | خطوات الوكيل | 3 خطوات |
-| درجة الثقة | 0.70 |
+| درجة الثقة (تقييم النموذج الذاتي) | 70% |
 
 ## ما الذي حدث
 
@@ -81,7 +81,7 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 - السجلات: <span dir="ltr">`1x [INFO] pipeline: pipeline started`</span>
 - السجلات: <span dir="ltr">`1x [ERROR] sync: ledger sync failed: attempt to write a readonly database`</span>
 
-تُظهر السجلات تكرار أخطاء الكتابة على قاعدة للقراءة فقط عند /orders، وخطأً واحدًا في مزامنة السجل المالي. الإعدادات لم تتغير (<span dir="ltr">v1.3</span>) وآخر تغيير فيها لا يتطابق مع وقت بدء الأخطاء، فخلل الإعدادات غير مرجح. وتُظهر الفحوص أن الطلبات المقبولة ومدفوعاتها لا تزال متطابقة. درجة الثقة في هذا التشخيص 0.70.
+تُظهر السجلات تكرار أخطاء الكتابة على قاعدة للقراءة فقط عند /orders، وخطأً واحدًا في مزامنة السجل المالي. الإعدادات لم تتغير (<span dir="ltr">v1.3</span>) وآخر تغيير فيها لا يتطابق مع وقت بدء الأخطاء، فخلل الإعدادات غير مرجح. وتُظهر الفحوص أن الطلبات المقبولة ومدفوعاتها لا تزال متطابقة. درجة الثقة في هذا التشخيص <span dir="ltr">70%</span>.
 
 ## الإجراءات المتخذة
 

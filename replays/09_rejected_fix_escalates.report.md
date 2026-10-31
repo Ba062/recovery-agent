@@ -6,7 +6,7 @@
 | Outcome | Escalated to a human |
 | Duration | 14.3 s |
 | Agent steps | 3 |
-| Confidence | 0.90 |
+| Confidence (model's self-assessment) | 90% |
 
 ## What happened
 
@@ -21,7 +21,7 @@ Ops changed payment_provider_url to internal://payments-v2 during a provider mig
 - Monitor: `payment_gap`: `10 of 26 orders were processed but have no payment.`
 - Logs: `41x [DEBUG] payment: provider call failed: payment provider unreachable at internal://payments-v2`
 
-The change log shows the payment_provider_url edit by ops, and the worker log repeats "payment provider unreachable" errors. The payment gap check confirms processed orders with no payment, with error_rate at zero, which is why health looked normal. Confidence is 0.90.
+The change log shows the payment_provider_url edit by ops, and the worker log repeats "payment provider unreachable" errors. The payment gap check confirms processed orders with no payment, with error_rate at zero, which is why health looked normal. Confidence is 90%.
 
 ## Actions taken
 
@@ -64,7 +64,7 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 | النتيجة | تم التصعيد إلى مهندس بشري |
 | المدة | 14.3 ثانية |
 | خطوات الوكيل | 3 خطوات |
-| درجة الثقة | 0.90 |
+| درجة الثقة (تقييم النموذج الذاتي) | 90% |
 
 ## ما الذي حدث
 
@@ -79,7 +79,7 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 - نظام المراقبة: طلبات عولجت دون دفع (<span dir="ltr">`payment_gap`</span>): <span dir="ltr">`10 of 26 orders were processed but have no payment.`</span>
 - السجلات: <span dir="ltr">`41x [DEBUG] payment: provider call failed: payment provider unreachable at internal://payments-v2`</span>
 
-يُظهر سجل التغييرات تعديل payment_provider_url من فريق العمليات، ويكرر سجل العامل أخطاء عدم إمكانية الوصول إلى مزوّد الدفع. ويؤكد فحص فجوة الدفع وجود طلبات معالجة بلا دفعة، مع بقاء error_rate عند الصفر، ولهذا بدت الصحة طبيعية. مستوى الثقة 0.90.
+يُظهر سجل التغييرات تعديل payment_provider_url من فريق العمليات، ويكرر سجل العامل أخطاء عدم إمكانية الوصول إلى مزوّد الدفع. ويؤكد فحص فجوة الدفع وجود طلبات معالجة بلا دفعة، مع بقاء error_rate عند الصفر، ولهذا بدت الصحة طبيعية. مستوى الثقة <span dir="ltr">90%</span>.
 
 ## الإجراءات المتخذة
 

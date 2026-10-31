@@ -298,7 +298,7 @@ def diagnosis_card(record: dict) -> None:
     outcome = ("✅ Recovered (verified in code)" if d["recovered"]
                else "🧑‍💻 Escalated to a human" if d["escalate"] else "❌ Not recovered")
     cols = st.columns(4)
-    cols[0].metric("Confidence", f"{d['confidence']:.2f}")
+    cols[0].metric("Confidence (model's self-assessment)", f"{d['confidence']:.0%}")  # display only: 0.9 -> 90%
     cols[1].metric("Agent steps", stats["steps"])
     cols[2].metric("Time", f"{stats['seconds']:.0f} s")
     cols[3].metric("Cost", f"${stats['est_cost_usd']:.3f}")

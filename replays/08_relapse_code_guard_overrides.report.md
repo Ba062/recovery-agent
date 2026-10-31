@@ -6,7 +6,7 @@
 | Outcome | Escalated to a human |
 | Duration | 16.7 s |
 | Agent steps | 4 |
-| Confidence | 0.70 |
+| Confidence (model's self-assessment) | 70% |
 
 ## What happened
 
@@ -23,7 +23,7 @@ The worker thread stalled in a wait state and never resumed. Why it stalled is n
 - Logs: `1x [DEBUG] worker: worker entered wait state`
 - Logs: `1x [DEBUG] sync: ledger synced`
 
-The queue grew while the processed count stayed flat, and the last worker log line was a debug message saying the worker entered a wait state. The worker heartbeat was stale before the restart. Configuration was identical before and after, and recent changes show nothing relevant. Confidence in this diagnosis is 0.70.
+The queue grew while the processed count stayed flat, and the last worker log line was a debug message saying the worker entered a wait state. The worker heartbeat was stale before the restart. Configuration was identical before and after, and recent changes show nothing relevant. Confidence in this diagnosis is 70%.
 
 ## Actions taken
 
@@ -67,7 +67,7 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 | النتيجة | تم التصعيد إلى مهندس بشري |
 | المدة | 16.7 ثانية |
 | خطوات الوكيل | 4 خطوات |
-| درجة الثقة | 0.70 |
+| درجة الثقة (تقييم النموذج الذاتي) | 70% |
 
 ## ما الذي حدث
 
@@ -84,7 +84,7 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 - السجلات: <span dir="ltr">`1x [DEBUG] worker: worker entered wait state`</span>
 - السجلات: <span dir="ltr">`1x [DEBUG] sync: ledger synced`</span>
 
-ازداد حجم الطابور بينما بقي عدد الطلبات المعالجة ثابتًا، وكان آخر سجل للعامل رسالة تصحيح تفيد بدخوله حالة انتظار. وكان نبض العامل متأخرًا قبل إعادة التشغيل. الإعدادات كانت متطابقة قبل التغيير وبعده، ولا توجد تغييرات حديثة ذات صلة. مستوى الثقة في هذا التشخيص 0.70.
+ازداد حجم الطابور بينما بقي عدد الطلبات المعالجة ثابتًا، وكان آخر سجل للعامل رسالة تصحيح تفيد بدخوله حالة انتظار. وكان نبض العامل متأخرًا قبل إعادة التشغيل. الإعدادات كانت متطابقة قبل التغيير وبعده، ولا توجد تغييرات حديثة ذات صلة. مستوى الثقة في هذا التشخيص <span dir="ltr">70%</span>.
 
 ## الإجراءات المتخذة
 

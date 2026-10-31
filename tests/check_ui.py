@@ -99,6 +99,9 @@ else:
     check("saved report split between the languages: English keeps its footer, no English above the Arabic",
           bool(english) and "All figures are inserted by code" in english[0]
           and bool(arabic) and "All figures are inserted by code" not in arabic[0])
+    check("diagnosis card: confidence as a percentage, labelled as the model's self-assessment",
+          any(m.label == "Confidence (model's self-assessment)" and m.value.endswith("%") for m in at.metric),
+          str([(m.label, m.value) for m in at.metric][-4:]))
 
     # ---- 4. Play from the start: animates into an auto-scrolling container with a progress bar
     shortest = min(range(len(names)), key=lambda i: len(names[i]) if "ealthy" in names[i] else 99)
@@ -381,6 +384,8 @@ check("live page: final view with before/after, money, diagnosis and the bilingu
       and any('dir="rtl"' in m.value for m in page.markdown), page.exception[0].message if page.exception else "")
 check("live page: the event stream shows both approvals",
       sum("✅ approved (by you)" in m.value for m in page.markdown) == 2)
+check("live page: the diagnosis shows confidence 0.9 as 90%, labelled as the model's self-assessment",
+      any(m.label == "Confidence (model's self-assessment)" and m.value == "90%" for m in page.metric))
 
 page = live_app()
 page.button(key="live_start").click().run()

@@ -103,7 +103,7 @@ def leftover_digits(text, record):
 
 
 # Code values the report must show, in both languages.
-EXPECTED = ["21", "8,880.43", "37", "16,709.10", "41", "19,744.00", "489.06", "17.8", "5", "0.90", "3.75",
+EXPECTED = ["21", "8,880.43", "37", "16,709.10", "41", "19,744.00", "489.06", "17.8", "5", "90%", "3.75",
             "2026-10-30 12:18:05 (UTC+3)", "internal://payments-v2", "internal://payments-v1",
             "51x [DEBUG] payment: provider call failed"]
 
@@ -126,6 +126,9 @@ for lang in ("en", "ar"):
         print(f"  {lang} digits not from code: {left}")
     checks[f"{lang}: after removing code-inserted values, NO digit is left"] = not left
     checks[f"{lang}: every placeholder filled"] = not report.PLACEHOLDER.search(text)
+    checks[f"{lang}: confidence as a percentage, labelled as the model's self-assessment"] = (
+        f"| {report.LABELS[lang]['confidence']} | 90% |" in text
+        and ("self-assessment" if lang == "en" else "تقييم النموذج الذاتي") in report.LABELS[lang]["confidence"])
 checks["en: peak table row = code values"] = (
     "| Peak (just before the first fix) | 37 (16,709.10 SAR) | 0 (0.00 SAR) | 0 (0.00 SAR) |" in versions["en"])
 checks["ar: peak table row = code values, every count with its noun"] = (

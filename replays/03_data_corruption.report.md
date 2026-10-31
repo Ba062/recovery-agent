@@ -6,7 +6,7 @@
 | Outcome | Recovered (verified against the business invariants) |
 | Duration | 27.4 s |
 | Agent steps | 5 |
-| Confidence | 0.93 |
+| Confidence (model's self-assessment) | 93% |
 
 ## What happened
 
@@ -67,7 +67,7 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 | النتيجة | تمت الاستعادة (وتم التحقق منها عبر مؤشرات الأعمال) |
 | المدة | 27.4 ثانية |
 | خطوات الوكيل | 5 خطوات |
-| درجة الثقة | 0.93 |
+| درجة الثقة (تقييم النموذج الذاتي) | 93% |
 
 ## ما الذي حدث
 

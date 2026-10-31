@@ -6,7 +6,7 @@
 | Outcome | Recovered (verified against the business invariants) |
 | Duration | 27.7 s |
 | Agent steps | 3 |
-| Confidence | 0.80 |
+| Confidence (model's self-assessment) | 80% |
 
 ## What happened
 
@@ -21,7 +21,7 @@ No fault was found in the order system, so the customer's stuck order is not exp
 - Logs: `13x [DEBUG] sync: ledger synced`
 - Logs: `1x [INFO] pipeline: pipeline started`
 
-Every created order has a recorded payment, the queue is empty, the worker heartbeat is current, and the invariant checks all pass. Confidence in this finding is 0.80, and a specific order ID is needed to go further.
+Every created order has a recorded payment, the queue is empty, the worker heartbeat is current, and the invariant checks all pass. Confidence in this finding is 80%, and a specific order ID is needed to go further.
 
 ## Actions taken
 
@@ -63,7 +63,7 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 | النتيجة | تمت الاستعادة (وتم التحقق منها عبر مؤشرات الأعمال) |
 | المدة | 27.7 ثانية |
 | خطوات الوكيل | 3 خطوات |
-| درجة الثقة | 0.80 |
+| درجة الثقة (تقييم النموذج الذاتي) | 80% |
 
 ## ما الذي حدث
 
@@ -78,7 +78,7 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 - السجلات: <span dir="ltr">`13x [DEBUG] sync: ledger synced`</span>
 - السجلات: <span dir="ltr">`1x [INFO] pipeline: pipeline started`</span>
 
-لكل طلب مُنشأ دفعة مسجلة، والطابور فارغ، ونبض العامل حديث، وجميع فحوص الاتساق سليمة. درجة الثقة في هذه النتيجة 0.80، ونحتاج إلى رقم الطلب المحدد لمتابعة التحقق.
+لكل طلب مُنشأ دفعة مسجلة، والطابور فارغ، ونبض العامل حديث، وجميع فحوص الاتساق سليمة. درجة الثقة في هذه النتيجة <span dir="ltr">80%</span>، ونحتاج إلى رقم الطلب المحدد لمتابعة التحقق.
 
 ## الإجراءات المتخذة
 

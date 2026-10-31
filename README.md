@@ -90,7 +90,7 @@ flowchart LR
     agent -- "claims recovered" --> verify["Verify in code:<br/>still green for ~15 s?"]
     verify -- "yes" --> report["Incident report<br/>English + Arabic"]
     verify -- "no: claim overridden" --> esc["Escalate to a human<br/>with evidence"]
-    agent -- "forced in code: confidence below 0.6,<br/>same fix blocked, refusal, 12 steps" --> esc
+    agent -- "forced in code: confidence below 0.6 (60%),<br/>same fix blocked, refusal, 12 steps" --> esc
     agent -.->|"model's own call, prompt only:<br/>after a rejection, or not recovered"| esc
     report --> ui["ui/app.py<br/>Streamlit dashboard"]
     esc --> ui
@@ -371,7 +371,7 @@ the relapse.
 4. **Safety rules enforced in code, not only asked for in the prompt:**
    - one fix per turn;
    - the same fix at most twice; a third attempt is blocked, and Nabd escalates if the system isn't recovered;
-   - confidence below 0.6 escalates;
+   - confidence below 0.6 (60%) escalates;
    - a step limit of 12, after which Nabd escalates (a model refusal escalates too);
    - a "recovered" claim must hold for ~15 s, or it's overridden and Nabd escalates.
 

@@ -93,7 +93,7 @@ def facts(record: dict) -> dict[str, str]:
     d, s = record["diagnosis"], record["stats"]
     f = {"investigation_started_at": riyadh_time(record["started_at"]), "duration_s": f"{s['seconds']:.1f}",
          "steps": str(s["steps"]), "fixes_applied": str(len(s["writes_applied"])),
-         "confidence": f"{d['confidence']:.2f}", "usd_to_sar": f"{RATES_TO_SAR['USD']:.2f}"}
+         "confidence": f"{d['confidence']:.0%}", "usd_to_sar": f"{RATES_TO_SAR['USD']:.2f}"}  # 0.9 -> "90%"
     for stage, money in [("alert", d.get("money_impact_before")), ("peak", d.get("money_impact_peak")),
                          ("end", d.get("money_impact_after"))]:
         if money is None:
@@ -148,7 +148,7 @@ RULES_AR = {"payment_gap": "طلبات عولجت دون دفع", "messages_drop
 LABELS = {
     "en": {
         "title": "Incident report", "started": "Investigation started", "outcome": "Outcome", "duration": "Duration",
-        "seconds": "s", "steps": "Agent steps", "confidence": "Confidence",
+        "seconds": "s", "steps": "Agent steps", "confidence": "Confidence (model's self-assessment)",
         "recovered": "Recovered (verified against the business invariants)",
         "escalated": "Escalated to a human", "not_recovered": "Not recovered",
         "recommend": "Diagnosis only (recommend mode, nothing was changed)",
@@ -169,7 +169,7 @@ LABELS = {
     },
     "ar": {
         "title": "تقرير الحادثة", "started": "بدء التحقيق", "outcome": "النتيجة", "duration": "المدة",
-        "seconds": "ثانية", "steps": "خطوات الوكيل", "confidence": "درجة الثقة",
+        "seconds": "ثانية", "steps": "خطوات الوكيل", "confidence": "درجة الثقة (تقييم النموذج الذاتي)",
         "recovered": "تمت الاستعادة (وتم التحقق منها عبر مؤشرات الأعمال)",
         "escalated": "تم التصعيد إلى مهندس بشري", "not_recovered": "لم تتم الاستعادة",
         "recommend": "تشخيص فقط (وضع التوصية، لم يُغيَّر أي شيء)",
