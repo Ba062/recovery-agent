@@ -158,9 +158,11 @@ ALERT = ("Health check: passing. 1 anomaly(ies), most urgent first:\n"
          "- [business] payment_gap: 11 of 27 orders were processed but have no payment.")
 FIXES = [("set_config", {"key": "payment_provider_url", "value": "internal://payments-v1"}),
          ("reprocess_orders", {"order_ids": "all_unpaid"})]
+# Like the real agent: reasoning before the first fix, none before the second (adaptive thinking often skips it).
+REASONING = "The provider URL was changed to payments-v2 and every payment call fails there. Revert it, then pay."
 NO_MONEY = {"count": 0, "by_currency": {}, "total_sar": 0.0}
 SOME_MONEY = {"count": 11, "by_currency": {"SAR": 4200.0}, "total_sar": 4200.0}
-fake = {"applied": [], "agent_calls": 0, "found": ["payment_gap"]}
+fake = {"applied": [], "agent_calls": 0, "found": ["payment_gap"], "reasoning": True}
 
 
 class FakeTraffic:
@@ -180,6 +182,8 @@ def fake_agent(alert: str, approve, on_event) -> tuple:
     fake["agent_calls"] += 1
     fake["applied"] = []
     on_event("alert", {"text": alert})
+    if fake["reasoning"]:
+        on_event("thinking", {"text": REASONING})
     for tool, args in FIXES:
         on_event("tool_call", {"tool": tool, "args": args})
         ok = approve(tool, args)
@@ -245,9 +249,16 @@ def pending_id(run) -> int | None:
 run = live.LiveRun("payment_drop")
 run.thread.start()
 check("live run: a fix waits for the human", wait(lambda: pending_id(run) == 1) and run.view()["pending"]["tool"] == "set_config")
+first_pending = run.view()["pending"]
 check("live run: approving answers it; a repeated or stale click is ignored",
       run.answer(1, True) and not run.answer(1, False) and not run.answer(99, True))
-check("live run: next fix waits, approve it", wait(lambda: pending_id(run) == 2) and run.answer(2, True))
+second_waits = wait(lambda: pending_id(run) == 2)
+second_pending = run.view()["pending"]
+check("live run: next fix waits, approve it", second_waits and run.answer(2, True))
+check("live run: each waiting fix carries Nabd's latest reasoning and the tool calls made since (0 = for this fix)",
+      first_pending.get("reasoning") == {"text": REASONING, "calls_after": 0}
+      and second_pending.get("reasoning") == {"text": REASONING, "calls_after": 1},
+      f"{first_pending.get('reasoning')} / {second_pending.get('reasoning')}")
 check("live run: finishes with the record, final check green, report saved, traffic stopped",
       wait(lambda: run.view()["done"]) and run.view()["record"]["diagnosis"]["recovered"] and run.view()["after"] == []
       and run.view()["saved"] is not None and traffic_handles[-1].killed and not run.view()["error"])
@@ -355,7 +366,13 @@ check("live page: Replay/Live switch, fault picker and Start shown, no exception
       not page.exception and any(b.key == "live_start" and not b.disabled for b in page.button)
       and page.selectbox(key="live_fault").value == "payment_drop")
 page.button(key="live_start").click().run()
+shown = wait_page(page, lambda p: any(b.key == "approve_1" for b in p.button))
+check("live page: the approval prompt quotes Nabd's latest reasoning",
+      shown and any("Nabd's latest reasoning" in m.value and REASONING in m.value for m in page.markdown))
 check("live page: Approve fix 1 in the browser", click_when_shown(page, "approve_1"))
+shown = wait_page(page, lambda p: any(b.key == "approve_2" for b in p.button))
+check("live page: a fix with no new reasoning says the reasoning came before other tool calls",
+      shown and any("before Nabd's last 1 tool call(s)" in c.value for c in page.caption))
 check("live page: Approve fix 2 in the browser", click_when_shown(page, "approve_2"))
 check("live page: final view with before/after, money, diagnosis and the bilingual report",
       wait_page(page, final_shown) and not page.exception
@@ -373,9 +390,14 @@ check("live page: after rejecting, the final view says still broken, escalated",
       wait_page(page, final_shown) and any(t.value.startswith("### After Nabd: still broken") for t in page.warning)
       and sum("❌ rejected (by you)" in m.value for m in page.markdown) == 2)
 
+fake["reasoning"] = False  # this run's agent writes no reasoning at all
 page = live_app()
 page.button(key="live_start").click().run()
 wait_page(page, lambda p: any(b.key == "approve_1" for b in p.button))
+check("live page: no reasoning yet -> the prompt says so instead of showing a stale or empty quote",
+      any("hasn't written any reasoning yet" in c.value for c in page.caption)
+      and not any("Nabd's latest reasoning" in m.value for m in page.markdown))
+fake["reasoning"] = True
 page.button(key="live_stop").click().run()
 check("live page: Stop while a fix waits -> run ends as stopped, nothing applied",
       wait(lambda: live.current().view()["done"]) and wait_page(page, lambda p: any("Stopped by you" in c.value for c in p.caption))

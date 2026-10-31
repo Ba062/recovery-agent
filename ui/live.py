@@ -90,6 +90,20 @@ def save_run(record: dict, fault: str) -> Path:
     return path
 
 
+# ---------------------------------------------------------------- Nabd's reasoning, for the approval prompt
+def latest_reasoning(events: list[dict]) -> dict | None:
+    """When Nabd asks for a fix: the text of its last "thinking" (summarized reasoning) or "thought" (its own words)
+    event, and how many tool calls it made after writing it, not counting the fix itself (0 = written for this fix).
+    With adaptive thinking the model often skips reasoning on simple steps, so it can be about an earlier step."""
+    calls = 0  # tool_call events walking back; the first one is the fix's own call (agent.py emits it, then approves)
+    for event in reversed(events):
+        if event["kind"] in ("thinking", "thought"):
+            return {"text": event["text"].strip(), "calls_after": max(calls - 1, 0)}
+        if event["kind"] == "tool_call":
+            calls += 1
+    return None
+
+
 # ---------------------------------------------------------------- one live run
 class LiveRun:
     def __init__(self, fault: str) -> None:
@@ -100,7 +114,7 @@ class LiveRun:
         self.lock = threading.Lock()   # the page thread and the run thread both touch the fields below
         self.events: list[dict] = []
         self.stage = STAGES[0]
-        self.pending: dict | None = None  # the fix waiting for the human: {"id", "tool", "args", "reply", "answered"}
+        self.pending: dict | None = None  # awaiting the human: {"id", "tool", "args", "reasoning", "reply", "answered"}
         self.ids = itertools.count(1)
         self.cancelled = threading.Event()
         self.alert: str | None = None
@@ -127,7 +141,7 @@ class LiveRun:
         """A consistent copy of the state for the page to draw."""
         with self.lock:
             pending = None if self.pending is None or self.pending["answered"] else {
-                k: self.pending[k] for k in ("id", "tool", "args")}
+                k: self.pending[k] for k in ("id", "tool", "args", "reasoning")}
             return {"stage": self.stage, "events": list(self.events), "pending": pending, "alert": self.alert,
                     "record": self.record, "after": self.after, "saved": self.saved, "error": self.error,
                     "done": self.done, "cancelled": self.cancelled.is_set()}
@@ -137,6 +151,7 @@ class LiveRun:
         """agent.run_agent calls this for every fix. Blocks until the human answers (or Stop / timeout)."""
         request = {"id": next(self.ids), "tool": tool, "args": args, "reply": queue.Queue(maxsize=1), "answered": False}
         with self.lock:  # checked and posted under the lock Stop takes, so a Stop can't slip in between
+            request["reasoning"] = latest_reasoning(self.events)
             stopped = self.cancelled.is_set()
             if not stopped:
                 self.pending = request

@@ -20,7 +20,9 @@ Replay mode is unchanged and is still the default.
 5. Pick a fault and press **▶ Start**. The faults on offer are the dev scenarios: payment_drop, payment_drop_silent,
    data_corruption, worker_hang, compound, unknown, relapse.
 6. Watch the stage strip and the live event stream. Whenever Nabd proposes a fix, the panel shows
-   "Nabd wants to run `tool(args)`", with **✅ Approve** and **❌ Reject**. Nothing changes until you click.
+   "Nabd wants to run `tool(args)`", Nabd's latest reasoning, and **✅ Approve** and **❌ Reject**. Nothing changes
+   until you click. The model often skips reasoning on simple steps, so if the reasoning was written before other tool
+   calls, the panel says so: it may be about an earlier step.
 7. At the end you see:
    - "At alert" next to "After Nabd" (one final monitor check);
    - the money figures;
@@ -107,14 +109,17 @@ don't appear in Replay mode, whose sources are unchanged.
     out the 10-minute timeout. Now the check and the post happen under the lock that Stop takes. New check: "a fix asked
     for after Stop is rejected at once".
   - **The final view** now says "After Nabd: not checked" when a run was stopped or failed before the final check.
-  - Neither change touches the approve-path logic the real run used, but `approve()` was edited. One more real run
-    before the demo would confirm it.
+  - Neither change touches the approve-path logic the real run used, but `approve()` was edited. Badr's browser runs
+    (next point) went through the edited `approve()`.
+- **Clicked through in a real browser by Badr** (Sat 31 Oct, 04:13-04:18, after the merge; records in `live_runs/`):
+  - data_corruption: rollback approved, `repair_ledger` **rejected**, so Nabd escalated instead of retrying;
+  - data_corruption again: both fixes approved, recovered;
+  - payment_drop_silent: both fixes approved, recovered.
+- **Sat 31 Oct, the approval prompt shows Nabd's latest reasoning** (code review L2). Checked with the mocked runs:
+  `check_ui.py` +4 checks (42/42), all 4 fail on the previous `ui/`. Not yet seen in a real live run.
 
 ## Known issues and limits
 
-- **Not clicked in a real browser by me.** The page was exercised through Streamlit's AppTest, the real server was
-  started, and the end-to-end run used the real page code. But nobody has clicked through it in Chrome/Edge yet. Worth
-  one manual run before the demo.
 - **Don't run live mode while tests or the eval use port 8000.** Live mode's reset stops the service there and wipes its
   database, so it would break a running eval (and the reverse). Nothing prevents this beyond the warning on the page.
 - **Stop can't interrupt an API call already in flight.** It rejects every further fix, and the agent finishes its

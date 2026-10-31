@@ -37,6 +37,7 @@ RTL_START = '<div dir="rtl">'  # the Arabic report starts with this (report.rend
 # indented on the left. Align to the start (= right, in Arabic) and mirror Streamlit's list indent.
 RTL_STYLE = ("<style>div[dir='rtl'] { text-align: start; } "
              "div[dir='rtl'] li { margin: 0.2em 1.15em 0.2em 0; padding: 0 0.3em 0 0; }</style>\n\n")
+REASONING_SHOWN = 600  # characters of Nabd's reasoning in the live approval prompt (the event stream has all of it)
 
 # What each read tool does, in plain words (shown instead of the tool name).
 READS = {
@@ -431,6 +432,17 @@ def approval_prompt(run: "live.LiveRun", pending: dict) -> None:
     args = ", ".join(f"{k}={v}" for k, v in pending["args"].items())
     with st.container(border=True):
         st.warning(f"**Nabd wants to run `{pending['tool']}({args})`.** Approve this fix?")
+        reasoning = pending.get("reasoning")  # see live.latest_reasoning
+        if reasoning:
+            text = reasoning["text"]
+            if len(text) > REASONING_SHOWN:
+                text = text[:REASONING_SHOWN].rstrip() + " …"
+            st.markdown("**Nabd's latest reasoning:**\n\n" + "\n".join(f"> {line}" for line in text.splitlines()))
+            if reasoning["calls_after"]:
+                st.caption(f"Written before Nabd's last {reasoning['calls_after']} tool call(s), so not necessarily "
+                           "about this fix. The stream above shows what it saw since.")
+        else:
+            st.caption("Nabd hasn't written any reasoning yet. The stream above shows what it has checked.")
         approve, reject, _ = st.columns([1, 1, 4])
         # The prompt disappears at the next refresh (within a second); a second click is ignored.
         if approve.button("✅ Approve", key=f"approve_{pending['id']}", type="primary"):
