@@ -38,6 +38,17 @@ took about 60 s.
 **Where runs go:** each run is saved to `live_runs/` (git-ignored) as `<time>_<fault>.json` plus `.report.md`. They
 don't appear in Replay mode, whose sources are unchanged.
 
+## Email notifications (optional)
+
+Optional **email notifications** in live mode (suggested in a mentor session): when a fix needs approval
+(tool, arguments and Nabd's latest reasoning) and when the incident ends (outcome, Nabd's summary and the money figures
+computed by code). They are sent with [Resend](https://resend.com) (free tier) by `notify.py`, using `requests`, so
+there's no new dependency. Set `RESEND_API_KEY` and `NOTIFY_TO` in `.env`. Without a verified domain, Resend sends from
+`onboarding@resend.dev` and **only to the Resend account owner's address**, so `NOTIFY_TO` must be that address.
+Without the key nothing is sent: the dashboard shows each notification in the event stream, labelled "email not
+configured", and logs it to `live_runs/notifications.jsonl`. A failed or slow send never blocks or breaks the incident
+run (`tests/check_notify.py`, HTTP mocked).
+
 ## How it works
 
 - **`ui/live.py` (new, no Streamlit code).** A `LiveRun` runs the whole incident in a background thread.

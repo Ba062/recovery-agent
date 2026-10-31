@@ -27,6 +27,7 @@ CHECKS = [
     "check_eval.py",
     "check_ui.py",
     "check_hooks.py",
+    "check_notify.py",
 ]
 LIVE_CHECKS = ["live/live_diagnose.py", "live/live_act.py"]
 

@@ -21,7 +21,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,10 +31,12 @@ for folder in (ROOT, ROOT / "eval"):
 import agent       # noqa: E402  (used unchanged: run_agent with our approve/on_event callbacks)
 import chaos       # noqa: E402
 import monitor     # noqa: E402
+import notify      # noqa: E402  (email via Resend; never raises, see notify.py)
 import report      # noqa: E402
 import scenarios   # noqa: E402  (eval/scenarios.py: the dev faults; inject() may return a stop function)
 
 LIVE_DIR = ROOT / "live_runs"   # records + reports of live runs (git-ignored)
+NOTIFY_LOG = LIVE_DIR / "notifications.jsonl"  # every notification, sent or not, with its status
 TRAFFIC_RATE = 5                 # orders per second, as in the eval
 TRAFFIC_SECONDS = 900            # long enough for any run; killed when the run ends
 WARMUP_S = 3
@@ -104,6 +106,40 @@ def latest_reasoning(events: list[dict]) -> dict | None:
     return None
 
 
+# ---------------------------------------------------------------- notifications (texts built by code)
+def sar_total(money: dict | None, *keys: str) -> str:
+    return "unknown" if not money else f"{sum(money[k]['total_sar'] for k in keys):,.2f} SAR"
+
+
+def approval_email(fault: str, tool: str, args: dict, reasoning: dict | None) -> tuple[str, str]:
+    call = f"{tool}({', '.join(f'{k}={v}' for k, v in args.items())})"
+    reason = reasoning["text"][:600] if reasoning else "(Nabd hasn't written any reasoning yet.)"
+    body = [f"Live incident ({FAULTS[fault]}).", "",
+            f"Nabd wants to run: {call}", "",
+            "Nabd's latest reasoning:", reason, "",
+            "Approve or reject it in the Nabd dashboard (Live mode). "
+            f"No answer in {APPROVAL_TIMEOUT_S // 60} min counts as a rejection."]
+    return f"[Nabd] Approval needed: {call}", "\n".join(body)
+
+
+def incident_email(fault: str, record: dict, after: list[tuple[str, str]]) -> tuple[str, str]:
+    """End of an incident: outcome, Nabd's summary, and the money figures computed by code (never by the model)."""
+    d = record["diagnosis"]
+    outcome = ("Recovered (verified in code)" if d["recovered"]
+               else "Escalated to a human" if d["escalate"] else "Not recovered")
+    peak = d.get("money_impact_peak") or d.get("money_impact_before")
+    final = "all green" if not after else "still broken: " + ", ".join(rule for rule, _ in after)
+    body = [f"Live incident ({FAULTS[fault]}).", "",
+            f"Outcome: {outcome}",
+            f"Final monitor check: {final}", "",
+            f"Summary (Nabd): {d['summary']}", "",
+            f"SAR at risk (just before the first fix): {sar_total(peak, 'unpaid_orders', 'ledger_overstatement')}",
+            f"SAR recovered: {sar_total(d.get('money_recovered'), 'orders_paid', 'ledger_corrected')}",
+            f"Still at risk at the end: {sar_total(d.get('money_impact_after'), 'unpaid_orders', 'ledger_overstatement')}",
+            "(Money figures are computed from the database by code.)"]
+    return f"[Nabd] Incident ended: {outcome}", "\n".join(body)
+
+
 # ---------------------------------------------------------------- one live run
 class LiveRun:
     def __init__(self, fault: str) -> None:
@@ -123,6 +159,7 @@ class LiveRun:
         self.saved: Path | None = None
         self.error: str | None = None
         self.done = False
+        self.notify_threads: list[threading.Thread] = []  # one per notification (tests join them)
         self.thread = threading.Thread(target=self._run, daemon=True, name="nabd-live")
 
     # ---- shared state
@@ -146,6 +183,31 @@ class LiveRun:
                     "record": self.record, "after": self.after, "saved": self.saved, "error": self.error,
                     "done": self.done, "cancelled": self.cancelled.is_set()}
 
+    def _notify(self, what: str, build, *args) -> None:
+        """Email in the background: a slow or failed send never delays the approval or the run.
+        build(*args) returns (subject, text); it runs in the background thread too, so a bug there can't break the run."""
+        def deliver() -> None:
+            try:
+                subject, text = build(*args)
+            except Exception as e:
+                subject, text = f"[Nabd] {what}", f"(the message could not be built: {type(e).__name__}: {e})"
+            try:
+                result = notify.send(subject, text)  # never raises; the guard is for anything unforeseen
+            except Exception as e:
+                result = {"status": notify.FAILED, "detail": f"{type(e).__name__}: {e}"}
+            self._event("notification", what=what, subject=subject, text=text, **result)
+            try:
+                LIVE_DIR.mkdir(exist_ok=True)
+                with NOTIFY_LOG.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps({"utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                        "fault": self.fault, "what": what, "subject": subject, "text": text,
+                                        **result}) + "\n")
+            except OSError:
+                pass  # the log is a convenience too
+        thread = threading.Thread(target=deliver, daemon=True, name="nabd-notify")
+        self.notify_threads.append(thread)
+        thread.start()
+
     # ---- approvals: called by the agent thread / by the page
     def approve(self, tool: str, args: dict) -> bool:
         """agent.run_agent calls this for every fix. Blocks until the human answers (or Stop / timeout)."""
@@ -158,6 +220,7 @@ class LiveRun:
         if stopped:
             self._event("approval", tool=tool, args=args, approved=False, how="run stopped")
             return False
+        self._notify("approval needed", approval_email, self.fault, tool, args, request["reasoning"])
         try:
             approved = request["reply"].get(timeout=APPROVAL_TIMEOUT_S)
             how = "by you"
@@ -216,6 +279,7 @@ class LiveRun:
             after = [(a.rule, a.message) for a in monitor.check_once(POLL_S)]
             with self.lock:
                 self.after = after
+            self._notify("incident ended", incident_email, self.fault, record, after)
             self._stage("Report")
             saved = save_run(record, self.fault)
             with self.lock:

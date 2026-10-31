@@ -226,6 +226,8 @@ live.inject = lambda fault: None
 live.run_agent = fake_agent
 live.save_run = fake_save
 live.has_api_key = lambda: True
+live.notify.send = lambda subject, text: {"status": live.notify.NOT_CONFIGURED, "detail": "test"}  # never a real email
+live.NOTIFY_LOG = saved_dir / "notifications.jsonl"  # never the real live_runs/
 live.monitor = NS(snapshot=lambda: {"health_ok": True},
                   evaluate=lambda prev, cur: [anomaly(r) for r in fake["found"]],
                   build_alert=lambda found, cur: found,
@@ -415,6 +417,10 @@ check("live page: without an API key, Start is disabled and says why",
       any(b.key == "live_start" and b.disabled for b in page.button)
       and any("ANTHROPIC_API_KEY" in e.value for e in page.error))
 live.has_api_key = lambda: True
+page = live_app()
+check("live page: a notification line says sent / not configured",
+      any("Notification" in c.value and ("email not configured" in c.value or "sent" in c.value) for c in page.caption),
+      str([c.value for c in page.caption][:6]))
 
 print(f"\n{passed}/{total} checks passed")
 sys.exit(0 if passed == total else 1)

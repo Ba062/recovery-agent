@@ -17,6 +17,7 @@ python tests/run_all.py --live    # plus the real-API checks (~5 min, ~$0.40)
 | `check_eval.py` | Eval code: grader verdicts on scripted runs, ablations engage and restore, freeze check, resume | nothing |
 | `check_ui.py` | Dashboard renders every saved run in replay mode (Streamlit AppTest, no server) | nothing |
 | `check_hooks.py` | Held-out fault hooks (v1.5, v1.6, provider_outage) work when triggered and are off after reset | the service |
+| `check_notify.py` | Live-mode email notifications (Resend): approval + end-of-incident emails, the not-configured path, a failed send never breaks the run (HTTP mocked) | nothing |
 | `live/live_diagnose.py` | Recommend mode finds the right root cause and fix order for each scenario | API key |
 | `live/live_act.py` | Act mode really recovers each scenario, claims are truthful, rejections escalate | API key |
 
