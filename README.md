@@ -181,6 +181,15 @@ python agent.py                    # checks the invariants; if broken, Nabd inve
 database), starts traffic and injects the fault. Nabd investigates, and you press **✅ Approve** or **❌ Reject** for
 each fix. Don't run it while the tests or the eval use port 8000. Details: [`LIVE_MODE.md`](LIVE_MODE.md).
 
+Optional **email notifications** in live mode (suggested in a mentor session): when a fix needs approval
+(tool, arguments and Nabd's latest reasoning) and when the incident ends (outcome, Nabd's summary and the money figures
+computed by code). They are sent with [Resend](https://resend.com) (free tier) by `notify.py`, using `requests`, so
+there's no new dependency. Set `RESEND_API_KEY` and `NOTIFY_TO` in `.env`. Without a verified domain, Resend sends from
+`onboarding@resend.dev` and **only to the Resend account owner's address**, so `NOTIFY_TO` must be that address.
+Without the key nothing is sent: the dashboard shows each notification in the event stream, labelled "email not
+configured", and logs it to `live_runs/notifications.jsonl`. A failed or slow send never blocks or breaks the incident
+run (`tests/check_notify.py`, HTTP mocked).
+
 **5. The evaluation** (see [`eval/PLAN.md`](eval/PLAN.md)):
 
 ```powershell
@@ -369,8 +378,8 @@ the relapse.
 | `98e2340053d1` (= `nabd-v2`, after the held-out results) | 8/8 (N=1) | `agent.py`: forced escalation when a run ends unresolved (F1), allow-listed provider URL (F7); `service/app.py`: 30 s error-rate window (F2) |
 | `7bceaa36b5bc` (= `nabd-v2.1`) | - | Only `service/app.py` (a fault hook for a new pre-registered scenario); `agent.py` byte-identical to `nabd-v2` |
 
-**v1.1 vs v2 on the same 25 held-out runs** (N=5 per scenario, same frozen grader; from `eval/results.csv` and
-`eval/results_v2.csv`). v2 was built after seeing these scenarios, so this shows what the changes did, not how v2
+**v1.1 vs v2 on the same 5 held-out scenarios** (25 runs each, N=5 per scenario, same frozen grader; from
+`eval/results.csv` and `eval/results_v2.csv`). v2 was built after seeing these scenarios, so this shows what the changes did, not how v2
 generalises:
 
 | How the run ended | v1.1 | v2 |
@@ -384,6 +393,12 @@ generalises:
 
 v2's lower automated score is all `provider_outage` (0/5): every run named the outage and escalated, but wrote "times
 out", which the frozen keyword list doesn't contain. After reading, v2 is 20/25. Details in [`eval/V2.md`](eval/V2.md).
+
+**Two new scenarios for v2**, pre-registered with their expected outcomes in
+[`eval/V2_SCENARIOS.md`](eval/V2_SCENARIOS.md) before any code for them existed, N=5 each on `nabd-v2.1`:
+`two_silent_causes` (deploy v1.4 plus a hand-edited payment URL) 5/5, and `partial_api_errors` (a deploy that fails
+about 30% of orders) 5/5. Every `partial_api_errors` pass came from the F1 forced escalation: the error rate was
+still clearing when the hold window started. They were designed by the same person who built v2.
 
 **What these hashes are:**
 - A **code version** is a hash of *every* frozen file (agent, monitor, service, eval grader), so it changes when any of
@@ -427,7 +442,7 @@ out", which the frozen keyword list doesn't contain. After reading, v2 is 20/25.
 5. **Money and figures computed by code.** SAR exposure and recovered amounts come from the database. The model's
    report prose is rejected if it contains any digit, so it can't invent a number, and it is HTML-escaped
    when rendered, so it can't inject markup into the dashboard.
-6. **A hand-written loop, no agent framework.** `agent.py` is about 630 lines that can be read and explained line by
+6. **A hand-written loop, no agent framework.** `agent.py` is about 640 lines that can be read and explained line by
    line. The model is Claude Sonnet 5.5 at `medium` effort, with adaptive thinking (summaries shown in the dashboard),
    prompt caching, and a server-side refusal fallback. If the safety classifier wrongly declines, the API retries on a
    fallback model within the same call; a final refusal makes Nabd escalate. The trade-off: there's no off-the-shelf memory or planning; none is needed
@@ -479,12 +494,14 @@ These are specific, and come from reading every failed run ([`eval/REVIEW.md`](e
   - **By runs:** Nabd 15/20 (95% CI 53%-89%) vs the runbook 6/12 (25%-75%). The intervals overlap, so the evidence for
     an advantage over a fixed table is limited: one scenario, plus the diagnosis and report Nabd gives.
 - **Small N, one system, one model.** Per-scenario rates are indicative; claims rest on pooled rates with confidence
-  intervals. The held-out scenarios were unseen by the agent, but designed by its builder.
+  intervals. The held-out scenarios were unseen by the frozen v1.1 agent (not by v2), but designed by its builder.
 - **Lost orders can't be replayed.** Orders dropped from the queue are lost: there is no requeue tool.
 
 ## Future work
 
-- A time-based error rate, and a rule that "recovery not verified" always escalates (the first limitation).
+- Verification that waits for the error-rate window to clear (or a window shorter than the hold). v2 added the
+  time-based window and the "not verified -> escalate" rule, but `bad_order_api_deploy` still can't be verified in time
+  (the first limitation).
 - Structured root causes (cause + component fields) instead of keyword grading.
 - A requeue tool for dropped orders, and a metric for orders stuck in `queued`.
 - Held-out scenarios written by someone other than the builder, and more runs per scenario.

@@ -49,6 +49,17 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"   [{detail}]" if detail else ""))
 
 
+def bm_when_drained(timeout=15):
+    """Business metrics once the backlog is paid (or after timeout). A fixed sleep was flaky on a busy machine:
+    the worker was still draining (60/76 paid after 4 s), not stuck."""
+    end = time.time() + timeout
+    while True:
+        m = bm()
+        if (m["queue_depth"] == 0 and m["payments_recorded"] == m["orders_created"]) or time.time() > end:
+            return m
+        time.sleep(1)
+
+
 def load(seconds, rate=5):
     return run("chaos.py", "load", str(seconds), str(rate))[1]
 
@@ -154,8 +165,7 @@ check("queue grows", m["queue_depth"] > 50, f"queue_depth {m['queue_depth']}")
 check("heartbeat goes stale (>15s)", m["worker_heartbeat_age_s"] > 15, f"{m['worker_heartbeat_age_s']}s")
 check("no unpaid orders (it's a hang, not a payment fault)", m["orders_without_payment"] == 0)
 requests.post(f"{URL}/admin/restart-worker", timeout=3)
-time.sleep(4)
-m = bm()
+m = bm_when_drained()
 check("restart-worker drains queue and pays everything",
       m["queue_depth"] == 0 and m["payments_recorded"] == m["orders_created"], f"{m['payments_recorded']}/{m['orders_created']}")
 check("heartbeat fresh again", m["worker_heartbeat_age_s"] < 3)
@@ -172,8 +182,7 @@ check("both signals visible, health green",
 subprocess.run([PY, "-c", "import chaos; chaos.set_config('payment_provider_url','internal://payments-v1')"], cwd=ROOT)
 wait_applied('payment_provider_url', 'internal://payments-v1')
 requests.post(f"{URL}/admin/restart-worker", timeout=3)
-time.sleep(4)
-m = bm()
+m = bm_when_drained()
 check("URL first, then restart -> everything paid, no reprocess needed",
       m["orders_without_payment"] == 0 and m["payments_recorded"] == m["orders_created"], f"{m['payments_recorded']}/{m['orders_created']}")
 
