@@ -137,8 +137,9 @@ flowchart LR
 
 ## Quick start
 
-Windows PowerShell, Python 3.11+, from the project root. Tested on Windows 11 with Python 3.12 (not tested on macOS
-or Linux).
+Windows PowerShell, Python 3.11+, from the project root. Tested on Windows 11 with Python 3.12. The
+no-API test suite (`tests/run_all.py`) also runs on Ubuntu with Python 3.12 in CI on every push (badge at the top).
+The dashboard and live mode were only tried on Windows; macOS is untested.
 
 ```powershell
 python -m venv .venv
