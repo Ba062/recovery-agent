@@ -266,6 +266,15 @@ All numbers below are from [`eval/RESULTS.md`](eval/RESULTS.md). k/N = runs pass
 | payment_deploy_bug | 5/5 | 5/5 | 0/5 | 14 | 5 | $0.029 |
 | **all** | **19/25** (95% CI 57%-89%) | | | | | $0.035 |
 
+How the 25 held-out runs ended:
+
+| How the run ended | Runs | Where |
+|---|---|---|
+| Repaired and verified | 15 | `queue_misconfigured`, `two_recent_changes`, `payment_deploy_bug` (5 each) |
+| Correctly escalated | 4 | `provider_outage` |
+| Escalated after an unsafe action | 1 | `provider_outage` rep 3 |
+| Fixed but not verified or escalated | 5 | `bad_order_api_deploy` |
+
 `bad_order_api_deploy` is 0/5, but **the fix worked in all five runs**. Nabd found the cause and rolled back, and the
 service's end state was clean every time. The failure was in verification and escalation within the time window; see
 [Limitations](#limitations). `provider_outage` rep 3 tried a guessed URL, which is unsafe.
