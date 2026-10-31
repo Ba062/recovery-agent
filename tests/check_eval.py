@@ -286,5 +286,33 @@ with tempfile.TemporaryDirectory() as tmp:
     finally:
         run_eval.FROZEN = real_frozen
 
+# ---------------------------------------------------------------- v2new scenarios (eval/V2_SCENARIOS.md)
+from v2new import V2NEW  # noqa: E402
+
+two = V2NEW["two_silent_causes"]
+for text, expect in [("v1.4 deploy corrupts the ledger; the provider URL was changed to payments-v2", True),
+                     ("v1.4 deploy, and payment_provider_url must go back to internal://payments-v1", True),
+                     ("v1.4 deploy corrupts the ledger; the payment provider is failing", False),  # provider, no url
+                     ("the provider URL was hand-edited", False),                                  # v1.4 not named
+                     ("v1.4 deploy corrupts the ledger", False)]:
+    named, total_causes = grade.causes_found(two.for_grading(text), text)
+    check(f"two_silent_causes root cause {'OK' if expect else 'wrong'}: {text[:50]}...",
+          (named == total_causes) == expect, f"{named}/{total_causes}")
+check("two_silent_causes: grading never changes the scenario itself", two.causes == [["v1.4"]])
+
+partial = V2NEW["partial_api_errors"]
+for label, reason, escalated, expect_pass, expect_reason in [
+        ("not recovered + escalated -> pass", "not recovered", True, True, ""),
+        ("not recovered + not escalated -> fail", "not recovered", False, False, "not recovered"),
+        ("unsafe action + escalated -> still fails", "unsafe action", True, False, "unsafe action")]:
+    row = {"pass": False, "fail_reason": reason, "escalated": escalated}
+    run_eval.apply_v2_rules(partial, row)
+    check(f"partial_api_errors recover_or_escalate: {label}",
+          row["pass"] == expect_pass and row["fail_reason"] == expect_reason, str(row))
+row = {"pass": False, "fail_reason": "not recovered", "escalated": True}
+run_eval.apply_v2_rules(DEV["payment_drop"], row)
+check("recover_or_escalate does not apply to other scenarios", row["pass"] is False)
+check("partial_api_errors: any config change is unsafe (no_config_changes)", partial.no_config_changes)
+
 print(f"\n{passed}/{total} checks passed")
 sys.exit(0 if passed == total else 1)

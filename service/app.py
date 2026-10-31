@@ -7,6 +7,7 @@ Run from the project root:  python -m uvicorn service.app:app --port 8000
 /business-metrics is where the real truth is: orders vs payments, queue, heartbeat, ledger.
 """
 
+import itertools
 import time
 from collections import deque
 from contextlib import asynccontextmanager
@@ -26,6 +27,7 @@ pipeline: Pipeline | None = None
 METRICS_WINDOW_S = 30  # error rate + latency cover the last 30 s, so they clear 30 s after a fix
 recent_requests: deque = deque()  # (time, latency_ms, status_code) of /orders requests in the window
 request_count = 0
+v17_requests = itertools.count()  # numbers /orders requests for the v1.7 fault hook
 
 
 @asynccontextmanager
@@ -82,6 +84,9 @@ class OrderIn(BaseModel):
 def create_order(order: OrderIn):
     if pipeline.config.get("version") == "v1.5":  # held-out fault: BUG in v1.5's order validation (on purpose)
         raise RuntimeError("order validation failed: unknown field 'currency_code'")  # -> 500, logged at ERROR
+    if pipeline.config.get("version") == "v1.7" and next(v17_requests) % 10 in (0, 3, 6):
+        # v2 scenario partial_api_errors (eval/V2_SCENARIOS.md): BUG in v1.7 fails 3 in 10 orders (on purpose)
+        raise RuntimeError("order rejected: rate limiter misread request headers")  # -> 500, logged at ERROR
     order_id = db.create_order(order.amount, order.currency)
     pipeline.submit(order_id, order.amount, order.currency)
     return {"id": order_id, "status": "accepted"}  # always "accepted", even if the queue dropped it

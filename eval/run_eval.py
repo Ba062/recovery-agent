@@ -160,7 +160,9 @@ def scenario_set(name: str) -> dict:
         return scenarios.DEV
     if name == "heldout":
         return importlib.import_module("heldout").HELDOUT  # eval/heldout.py, written after the freeze
-    raise SystemExit(f"unknown set {name!r} (dev or heldout)")
+    if name == "v2new":
+        return importlib.import_module("v2new").V2NEW  # eval/v2new.py, pre-registered in V2_SCENARIOS.md
+    raise SystemExit(f"unknown set {name!r} (dev, heldout or v2new)")
 
 
 # ---------------------------------------------------------------- one run
@@ -221,9 +223,10 @@ def run_one(set_name: str, scenario, variant: str, arm: str, rep: int) -> tuple[
         "code_version": version, "fingerprint": used or "", "frozen_ok": "" if changed is None else not changed,
         "trigger": trigger, "orders_lost": summary.get("orders_lost"),
         "exposure_at_alert_sar": sar(detection["money_at_alert"], "unpaid_orders", "ledger_overstatement"),
-        **grade.verdict(scenario, variant, t_inject, detection, summary, truth),
+        **grade.verdict(graded_as(scenario, summary), variant, t_inject, detection, summary, truth),
     }
     apply_heldout_rules(scenario, summary, row)
+    apply_v2_rules(scenario, row)
     if record:
         stats, diagnosis = record["stats"], record["diagnosis"]
         row.update({k: stats[k] for k in ("steps", "input_tokens", "output_tokens", "cache_read_tokens",
@@ -254,6 +257,19 @@ def apply_heldout_rules(scenario, summary: dict, row: dict) -> None:
     row["pass_no_guards"] = False
 
 
+def graded_as(scenario, summary: dict):
+    """v2new scenarios can adapt their cause words to the run (eval/v2new.py); others are graded as they are."""
+    for_grading = getattr(scenario, "for_grading", None)
+    return for_grading(summary["root_cause_text"]) if for_grading else scenario
+
+
+def apply_v2_rules(scenario, row: dict) -> None:
+    """v2new rule (pre-registered in V2_SCENARIOS.md): recover_or_escalate turns "not recovered" into a pass
+    when the run ended escalated. "not recovered" is the last check, so every generic check has passed."""
+    if getattr(scenario, "recover_or_escalate", False) and row["fail_reason"] == "not recovered" and row["escalated"]:
+        row["pass"], row["fail_reason"] = True, ""
+
+
 def config_value(attempt: dict):
     """The value a set_config attempt asked for, parsed like agent.set_config does."""
     try:
@@ -271,7 +287,7 @@ def run_matrix(sets: list[str], arm_names: list[str], variants: list[str], reps:
     for variant in variants:
         if variant not in scenarios.VARIANTS:
             raise SystemExit(f"unknown variant {variant!r}; choose from {list(scenarios.VARIANTS)}")
-    if "heldout" in sets:
+    if "heldout" in sets or "v2new" in sets:
         changed = changed_since_freeze()
         if changed is None:
             raise SystemExit(f"No {FROZEN.name}: freeze the agent before running held-out scenarios.")
@@ -285,8 +301,8 @@ def run_matrix(sets: list[str], arm_names: list[str], variants: list[str], reps:
     for set_name in sets:
         pool = scenario_set(set_name)
         for variant in variants:
-            names = pool if set_name == "heldout" else scenarios.VARIANTS[variant]
-            if variant != "normal" and set_name == "heldout":
+            names = pool if set_name in ("heldout", "v2new") else scenarios.VARIANTS[variant]
+            if variant != "normal" and set_name in ("heldout", "v2new"):
                 continue  # robustness variants run on dev scenarios only
             for name in names:
                 if only and name not in only:

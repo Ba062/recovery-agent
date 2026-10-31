@@ -91,6 +91,22 @@ check("v2 F2: 10 recent 500s of 20 recent requests -> error rate 0.5", svc.metri
 svc.recent_requests.clear()
 check("v2 F2: no requests -> error rate 0", svc.metrics()["error_rate"] == 0.0)
 
+# v1.7 (v2 scenario partial_api_errors): 3 in 10 POST /orders return 500, logged at ERROR; rollback fixes it
+chaos.reset()
+chaos.set_config("version", "v1.7")
+wait_reload("version", "v1.7")
+codes = [order().status_code for _ in range(20)]
+check("v1.7: 6 of 20 POST /orders return 500, the rest 200",
+      codes.count(500) == 6 and codes.count(200) == 14, str(codes))
+check("v1.7: the failures are logged at ERROR", any(r["level"] == "ERROR" for r in logs("rate limiter misread")))
+check("v1.7: error rate about 30% (monitor threshold 5%)", 0.25 <= error_rate() <= 0.35, str(error_rate()))
+b = business()
+check("v1.7: health still green, accepted orders still paid", requests.get(f"{URL}/health", timeout=3).status_code == 200
+      and b["orders_created"] == 14, str(b))
+chaos.set_config("version", "v1.3")
+wait_reload("version", "v1.3")
+check("v1.7 -> v1.3: every order works again", all(order().status_code == 200 for _ in range(10)))
+
 # v1.6: the payment step fails silently (DEBUG), the order is processed unpaid; reprocess fails until rollback
 chaos.reset()
 chaos.set_config("version", "v1.6")
