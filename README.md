@@ -59,6 +59,12 @@ errors. Classic monitoring (a health check, plus error-rate and latency threshol
 example, "a repair agent that never escalates", is the opposite trap: automation that keeps retrying instead of
 asking a human.
 
+Google's SRE book reports that "roughly 70% of outages are due to changes in a live system"
+([Site Reliability Engineering, Introduction](https://sre.google/sre-book/introduction/)). In Nabd's evaluation, 8 of
+the 12 fault scenarios (7 dev, 5 held-out; the `healthy` control has no fault) start with a deploy or config change:
+`payment_drop`, `payment_drop_silent`, `data_corruption` and `compound` (its payment fault is a config change) in dev,
+and every held-out scenario except `provider_outage`.
+
 Nabd's answer:
 - watch **business invariants** (orders vs payments, enqueued vs processed, worker heartbeat, ledger vs orders);
 - let an LLM investigate only when one breaks;
@@ -157,7 +163,12 @@ python agent.py                    # checks the invariants; if broken, Nabd inve
                                    # The run and its incident report are saved to replays/ (one extra API call)
 ```
 
-**4. The evaluation** (see [`eval/PLAN.md`](eval/PLAN.md)):
+**4. A live incident in the dashboard** (needs `ANTHROPIC_API_KEY=...` in `.env`): start the dashboard as in 1, switch
+**Mode** to **Live**, pick a fault and press **▶ Start**. The dashboard resets the service on port 8000 (wiping its
+database), starts traffic and injects the fault. Nabd investigates, and you press **✅ Approve** or **❌ Reject** for
+each fix. Don't run it while the tests or the eval use port 8000. Details: [`LIVE_MODE.md`](LIVE_MODE.md).
+
+**5. The evaluation** (see [`eval/PLAN.md`](eval/PLAN.md)):
 
 ```powershell
 python eval/run_eval.py check                                  # harness check, no API
@@ -178,11 +189,13 @@ python eval/summarize.py                                       # -> eval/RESULTS
 | `relapse` | 5 | The worker hangs again about 5 s after every restart | Escalate after at most 2 identical fixes |
 | `healthy` | Control | Nothing: a human-style report with no fault | Change nothing |
 
-Official example 2 (a queue that loses messages under load) is detected by the monitor (`messages_dropped`), but it
-was dropped as a dev scenario after organisers confirmed the examples aren't mandatory.
+Official example 2 (a queue that loses messages under load) is covered by the held-out scenario `queue_misconfigured`,
+where Nabd passed 5/5. A config change sets the queue limit `queue_max` to 0, so every new order is answered
+"accepted" and then silently dropped; the monitor's `messages_dropped` rule catches it while `/health` and the error
+rate stay green. Unlike a real traffic spike, a limit of 0 loses orders at normal traffic too (5 orders per second).
 
 **Held-out scenarios**, designed by Badr after the freeze ([`eval/HELDOUT.md`](eval/HELDOUT.md)):
-- `queue_misconfigured`: a pipeline setting is wrong, and a restart doesn't help;
+- `queue_misconfigured` (official example 2): the queue limit is set to 0, and a restart doesn't help;
 - `bad_order_api_deploy`: a deploy breaks the order API with 500s;
 - `two_recent_changes`: the guilty deploy is hidden behind a more recent, innocent config change;
 - `provider_outage`: the payment provider is down and the URL is correct, so Nabd must escalate;
@@ -422,7 +435,6 @@ These are specific, and come from reading every failed run ([`eval/REVIEW.md`](e
 ## Future work
 
 - A time-based error rate, and a rule that "recovery not verified" always escalates (the first limitation).
-- Live mode in the dashboard: inject a fault and press Approve/Reject in the browser (the CLI does this today).
 - Structured root causes (cause + component fields) instead of keyword grading.
 - A requeue tool for dropped orders, and a metric for orders stuck in `queued`.
 - Held-out scenarios written by someone other than the builder, and more runs per scenario.

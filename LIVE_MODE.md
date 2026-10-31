@@ -1,6 +1,6 @@
 # Live mode (dashboard)
 
-Branch `live-mode`; not merged into `main`.
+Built on branch `live-mode`; merged into `main` on Sat 31 Oct (`cfb83cd`).
 
 Live mode runs a **real incident** from the dashboard. You approve or reject every fix in the browser:
 
