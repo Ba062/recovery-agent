@@ -1,5 +1,13 @@
 # Nabd (نبض, "pulse"): an AI agent for silent failures
 
+[![CI](https://github.com/Ba062/recovery-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Ba062/recovery-agent/actions/workflows/ci.yml)
+
+> **TL;DR**
+> - **Problem:** failures where `/health` stays green but orders go unpaid, ledgers go wrong or work stops.
+> - **Detection:** Nabd checks business invariants, not health: it noticed 21/21 silent dev faults (health check: 0/21), with 0 false alarms.
+> - **Recovery:** a Claude agent finds the cause and applies one human-approved fix at a time; code verifies the result. Dev 32/32, held-out 19/25, about $0.03 per incident.
+> - **Safety:** fixed tool allow-list, no shell; code forces an escalation on low confidence, a repeated failed fix or the step limit.
+
 **Nabd diagnoses failing systems from logs and metrics and safely brings them back online, with a human in the loop.**
 Health checks say everything is fine. Nabd checks whether the business is actually working.
 
@@ -9,7 +17,7 @@ Health checks say everything is fine. Nabd checks whether the business is actual
 
 **Demo video (3 min):** *PLACEHOLDER: YouTube link (unlisted)*
 
-## The result in two tables
+## The result at a glance
 
 On a simulated order pipeline where faults stay silent (`/health` returns 200 the whole time):
 
@@ -40,7 +48,7 @@ On a simulated order pipeline where faults stay silent (`/health` returns 200 th
 
 ## Contents
 
-[The problem](#the-problem) · [How Nabd works](#how-nabd-works) · [Quick start](#quick-start) ·
+[The result at a glance](#the-result-at-a-glance) · [The problem](#the-problem) · [How Nabd works](#how-nabd-works) · [Quick start](#quick-start) ·
 [Scenarios](#scenarios) · [Evaluation method](#evaluation-method) · [Results](#results) ·
 [Design decisions](#design-decisions-and-trade-offs) · [Limitations](#limitations) · [Future work](#future-work) ·
 [How it was built](#how-it-was-built)
