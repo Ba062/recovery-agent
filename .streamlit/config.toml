@@ -1,0 +1,6 @@
+# Nabd brand colours. Errors and broken states keep Streamlit's own red.
+[theme]
+base = "light"
+primaryColor = "#0B5D4B"
+secondaryBackgroundColor = "#EEF9F4"
+textColor = "#14211D"

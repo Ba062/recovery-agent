@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "ui"))
 import report      # noqa: E402  (renders the bilingual incident report from a record; no API call)
 import supervisor  # noqa: E402  ("Stop the service" in live mode)
 import live        # noqa: E402  (live mode: the incident runs in a background thread)
+import notify      # noqa: E402  (live mode: email notifications via Resend)
 
 SOURCES = {"Showcase replays": ROOT / "replays", "Eval runs": ROOT / "eval" / "runs"}
 RESULTS_CSV = ROOT / "eval" / "results.csv"
@@ -229,13 +230,15 @@ def show_result(tool: str, text: str) -> None:
     if tool == "read_logs" and "Most recent" in text:
         summary, _, recent = text.partition("Most recent")
         st.code(summary.strip(), language=None, wrap_lines=True)
-        with st.expander("Latest log lines"):
-            for line in recent.splitlines()[1:]:
-                try:
-                    r = json.loads(line)
-                    st.text(f"{r['ts'][11:19]}  {r['level']:<7} {r.get('component', '')}: {r['msg']}")
-                except (json.JSONDecodeError, KeyError):
-                    st.text(line)
+        st.caption("Latest log lines")
+        lines = []
+        for line in recent.splitlines()[1:]:
+            try:
+                r = json.loads(line)
+                lines.append(f"{r['ts'][11:19]}  {r['level']:<7} {r.get('component', '')}: {r['msg']}")
+            except (json.JSONDecodeError, KeyError):
+                lines.append(line)
+        st.text("\n".join(lines))
         return
     if tool == "recent_changes" and text.startswith("["):
         rows = []
@@ -283,9 +286,13 @@ def show_event(e: dict) -> None:
         if e["tool"] in WRITE_TOOLS:
             st.markdown(f"{t} → {write_status(e['text'], e['is_error'])}")
             if not e["text"].startswith(("REJECTED", "BLOCKED", "SKIPPED")):
-                show_result(e["tool"], e["text"])
+                with st.expander(f"{e['t']:.1f}s  📄 What `{e['tool']}` returned"):
+                    show_result(e["tool"], e["text"])
+        elif e["tool"] == "check_invariants":
+            show_result(e["tool"], e["text"])  # the verdict (green / still broken) stays in view
         else:
-            show_result(e["tool"], e["text"])
+            with st.expander(f"{e['t']:.1f}s  📄 Result: {READS.get(e['tool'], e['tool'])}"):
+                show_result(e["tool"], e["text"])
     elif e["kind"] == "verification":
         st.warning(f"{t} 🛡️ **Nabd's code check overrides the model:** {e['text']}")
     elif e["kind"] == "fallback":
@@ -415,6 +422,22 @@ def stage_strip(view: dict) -> None:
     st.markdown(" → ".join(parts))
 
 
+NOTIFY_ICONS = {notify.SENT: "📧", notify.NOT_CONFIGURED: "📭", notify.FAILED: "⚠️"}
+
+
+def notification_line(events: list[dict]) -> str:
+    """One line for the live page: the latest notification's status, or whether email is set up at all."""
+    sent = [e for e in events if e["kind"] == "notification"]
+    if sent:
+        last = sent[-1]
+        return (f"{NOTIFY_ICONS.get(last['status'], '📨')} Notification ({last['what']}): {last['status']}"
+                f" ({last['detail']})")
+    if notify.configured():
+        return "📧 Notifications: email configured (sent when a fix needs approval and when the incident ends)"
+    return ("📭 Notifications: email not configured. They are shown in the event stream and logged to "
+            "live_runs/notifications.jsonl (set RESEND_API_KEY and NOTIFY_TO in .env to email them)")
+
+
 def show_live_event(e: dict) -> None:
     """Pipeline steps and approvals here; everything the agent does is drawn like in replay mode."""
     if e["kind"] == "stage":
@@ -424,6 +447,10 @@ def show_live_event(e: dict) -> None:
     elif e["kind"] == "approval":
         verdict = "✅ approved" if e["approved"] else "❌ rejected"
         st.markdown(f"`{e['t']:>5.1f}s` 🧑 `{e['tool']}` {verdict} ({e['how']})")
+    elif e["kind"] == "notification":
+        st.markdown(f"`{e['t']:>5.1f}s` {NOTIFY_ICONS.get(e['status'], '📨')} **{e['what']}**: {e['status']}")
+        with st.expander(e["subject"]):
+            st.text(e["text"])
     elif e["kind"] != "diagnosis":  # the diagnosis is shown in full at the end
         show_event(e)
 
@@ -454,6 +481,7 @@ def approval_prompt(run: "live.LiveRun", pending: dict) -> None:
 def live_view(run: "live.LiveRun", final: bool) -> None:
     view = run.view()
     stage_strip(view)
+    st.caption(notification_line(view["events"]))
     if view["error"]:
         st.error(f"The live run failed: {view['error']}")
     if view["alert"]:
@@ -521,6 +549,7 @@ def live_page() -> None:
                       help="Live mode leaves the service on port 8000 running so you can inspect it."):
         st.info(supervisor.stop())
     if run is None:
+        st.caption(notification_line([]))
         st.info("Pick a fault and press Start. Every fix Nabd proposes will wait here for your Approve or Reject.")
     elif busy:
         live_panel()
@@ -530,7 +559,9 @@ def live_page() -> None:
 
 # ---------------------------------------------------------------- page
 st.set_page_config(page_title="Nabd · نبض", page_icon="💓", layout="wide")
-st.title("Nabd · نبض")
+logo, title = st.columns([1, 15], vertical_alignment="center")
+logo.image(str(ROOT / "docs" / "logo.svg"), width=56)
+title.title("Nabd · نبض")
 st.caption(TAGLINE)
 mode = st.radio("Mode", ["Replay", "Live"], horizontal=True, key="mode",
                 help="Replay: step through saved incidents (no service, no API key). Live: run a real incident now.")
