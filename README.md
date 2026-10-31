@@ -5,8 +5,7 @@ Health checks say everything is fine. Nabd checks whether the business is actual
 
 *HUMAIN × Misk "Future AI Builders" hackathon, Challenge 1: Agentic Recovery of a Failing System.*
 
-<!-- PLACEHOLDER: dashboard screenshot. Save it as docs/dashboard.png, then delete this comment. -->
-![Nabd dashboard: health check passing while the business invariants are broken; Nabd fixes it and verifies](docs/dashboard.png)
+![Nabd dashboard, compound incident replay: health check passing while the business invariants are broken; Nabd fixes it and verifies](docs/dashboard.png)
 
 **Demo video (3 min):** *PLACEHOLDER: YouTube link (unlisted)*
 
@@ -126,7 +125,8 @@ flowchart LR
 
 ## Quick start
 
-Windows PowerShell, Python 3.11+, from the project root.
+Windows PowerShell, Python 3.11+, from the project root. Tested on Windows 11 with Python 3.12 (not tested on macOS
+or Linux).
 
 ```powershell
 python -m venv .venv
@@ -365,8 +365,9 @@ the relapse.
    system. The trade-off: a fault that breaks no rule is never investigated (the false-alarm window shows the rules
    are quiet when they should be).
 3. **Read tools free, write tools need approval, a fixed allow-list.** There is no shell, no SQL and no arbitrary code,
-   so the worst a wrong diagnosis can do is one approved, auditable change. Config changes and rollbacks are also
-   written to the deploy history as `nabd-agent`.
+   so a wrong diagnosis can only lead to changes from the allow-list, each approved by a human. Every change is one
+   approved action, recorded in the run record; config changes and rollbacks also go to the deploy history as
+   `nabd-agent`.
 4. **Safety rules enforced in code, not only asked for in the prompt:**
    - one fix per turn;
    - the same fix at most twice; a third attempt is blocked, and Nabd escalates if the system isn't recovered;
