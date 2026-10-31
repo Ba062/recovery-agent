@@ -1,9 +1,10 @@
-"""Nabd dashboard, replay-first: step through a saved incident without the service or an API key.
+"""Nabd dashboard. Two modes:
+- Replay (default): step through a saved incident, with no service and no API key. Saved incidents come from
+  replays/ (curated showcase runs with incident reports) and eval/runs/ (every eval run, with its verdict).
+- Live: run a real incident now (reset the service, inject a fault, Nabd investigates) and approve or reject
+  every fix in the browser. The incident runs in a background thread: see ui/live.py.
 
-Run from the project root:  streamlit run ui/app.py --server.port 8502
-
-Saved incidents come from replays/ (curated showcase runs with incident reports) and eval/runs/ (every eval run,
-with the eval's own ground truth and verdict). Live mode (inject a fault, approve fixes) comes later.
+Run from the project root:  streamlit run ui/app.py --server.port 8502 --server.headless true
 """
 
 import csv
@@ -19,7 +20,10 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import report  # noqa: E402  (renders the bilingual incident report from a record; no API call)
+sys.path.insert(0, str(ROOT / "ui"))
+import report      # noqa: E402  (renders the bilingual incident report from a record; no API call)
+import supervisor  # noqa: E402  ("Stop the service" in live mode)
+import live        # noqa: E402  (live mode: the incident runs in a background thread)
 
 SOURCES = {"Showcase replays": ROOT / "replays", "Eval runs": ROOT / "eval" / "runs"}
 RESULTS_CSV = ROOT / "eval" / "results.csv"
@@ -385,10 +389,134 @@ def evaluation_tab() -> None:
             st.markdown(results.read_text(encoding="utf-8"))
 
 
+# ---------------------------------------------------------------- live mode (the incident itself runs in ui/live.py)
+def stage_strip(view: dict) -> None:
+    """Reset service → … → Report, with ✅ done, ⏳ running, ▫️ to do (⏹️ stopped, ❌ failed)."""
+    now = live.STAGES.index(view["stage"])
+    ended_badly = view["error"] or view["cancelled"]
+    parts = []
+    for i, name in enumerate(live.STAGES):
+        if i < now or (i == now and view["done"] and not ended_badly):
+            icon = "✅"
+        elif i == now:
+            icon = ("❌" if view["error"] else "⏹️") if view["done"] else "⏳"
+        else:
+            icon = "▫️"
+        parts.append(f"{icon} {name}")
+    st.markdown(" → ".join(parts))
+
+
+def show_live_event(e: dict) -> None:
+    """Pipeline steps and approvals here; everything the agent does is drawn like in replay mode."""
+    if e["kind"] == "stage":
+        st.markdown(f"`{e['t']:>5.1f}s` **▶ {e['text']}**")
+    elif e["kind"] == "note":
+        st.caption(f"{e['t']:.1f}s · {e['text']}")
+    elif e["kind"] == "approval":
+        verdict = "✅ approved" if e["approved"] else "❌ rejected"
+        st.markdown(f"`{e['t']:>5.1f}s` 🧑 `{e['tool']}` {verdict} ({e['how']})")
+    elif e["kind"] != "diagnosis":  # the diagnosis is shown in full at the end
+        show_event(e)
+
+
+def approval_prompt(run: "live.LiveRun", pending: dict) -> None:
+    args = ", ".join(f"{k}={v}" for k, v in pending["args"].items())
+    with st.container(border=True):
+        st.warning(f"**Nabd wants to run `{pending['tool']}({args})`.** Approve this fix?")
+        approve, reject, _ = st.columns([1, 1, 4])
+        # The prompt disappears at the next refresh (within a second); a second click is ignored.
+        if approve.button("✅ Approve", key=f"approve_{pending['id']}", type="primary"):
+            run.answer(pending["id"], True)
+        if reject.button("❌ Reject", key=f"reject_{pending['id']}"):
+            run.answer(pending["id"], False)
+
+
+def live_view(run: "live.LiveRun", final: bool) -> None:
+    view = run.view()
+    stage_strip(view)
+    if view["error"]:
+        st.error(f"The live run failed: {view['error']}")
+    if view["alert"]:
+        found = anomalies(view["alert"])
+        left, right = st.columns(2)
+        left.error(f"### At alert: {len(found)} broken\n" + "\n".join(f"- {friendly(r, m)}" for r, m in found))
+        if view["alert"].startswith("Health check: passing"):
+            left.caption("Meanwhile /health said **passing** ✅ (the shallow check most monitoring relies on).")
+        if view["after"] is None and view["done"]:
+            right.info("### After Nabd: not checked\nThe run was stopped or failed before the final check.")
+        elif view["after"] is None:
+            right.info("### After Nabd: …\nThe final check runs when Nabd has finished.")
+        elif not view["after"]:
+            right.success("### After Nabd: all green\nOne monitor check on the service, just now.")
+        else:
+            right.warning("### After Nabd: still broken\n" + "\n".join(f"- {friendly(r, m)}" for r, m in view["after"]))
+    if view["pending"]:
+        approval_prompt(run, view["pending"])
+    st.subheader("Live event stream")
+    with st.container(height=520, border=True, autoscroll=True):  # keeps the newest event in view
+        for e in view["events"]:
+            show_live_event(e)
+    if final and view["record"]:
+        record = view["record"]
+        money_banner(record)
+        st.subheader("Diagnosis")
+        diagnosis_card(record)
+        if view["saved"]:
+            st.subheader("Incident report")
+            report_tab(view["saved"], record)
+
+
+@st.fragment(run_every=1.0)
+def live_panel() -> None:
+    """Redraws every second while the incident runs (only this part of the page, not the whole page)."""
+    run = live.current()
+    if run is None:
+        return
+    live_view(run, final=False)
+    if run.view()["done"]:
+        st.rerun()  # once more for the whole page: the final view, without auto-refresh
+
+
+def live_page() -> None:
+    st.subheader("Live incident")
+    st.caption("Runs a real incident on this machine: resets the service on port 8000 (its database is wiped), "
+               "injects the fault you pick, and Nabd investigates with the real Claude API (a few cents). "
+               "You approve or reject every fix.")
+    run = live.current()
+    busy = run is not None and not run.done
+    if not live.has_api_key():
+        st.error("Live mode needs ANTHROPIC_API_KEY in .env. Replay mode doesn't.")
+    left, middle, right = st.columns([3, 1, 1], vertical_alignment="bottom")
+    fault = left.selectbox("Fault to inject", list(live.FAULTS), format_func=lambda f: live.FAULTS[f],
+                           key="live_fault", disabled=busy)
+    if middle.button("▶ Start", key="live_start", type="primary", disabled=busy or not live.has_api_key()):
+        try:
+            run, busy = live.start(fault), True
+        except RuntimeError as e:  # another browser tab started one first
+            st.error(str(e))
+    if busy:
+        if right.button("■ Stop", key="live_stop", help="Rejects any further fix and skips the remaining steps."):
+            run.cancel()
+    elif right.button("Stop the service", key="live_stop_service",
+                      help="Live mode leaves the service on port 8000 running so you can inspect it."):
+        st.info(supervisor.stop())
+    if run is None:
+        st.info("Pick a fault and press Start. Every fix Nabd proposes will wait here for your Approve or Reject.")
+    elif busy:
+        live_panel()
+    else:
+        live_view(run, final=True)
+
+
 # ---------------------------------------------------------------- page
 st.set_page_config(page_title="Nabd · نبض", page_icon="💓", layout="wide")
 st.title("Nabd · نبض")
 st.caption(TAGLINE)
+mode = st.radio("Mode", ["Replay", "Live"], horizontal=True, key="mode",
+                help="Replay: step through saved incidents (no service, no API key). Live: run a real incident now.")
+if mode == "Live":
+    live_page()
+    st.stop()
 
 with st.sidebar:
     st.header("Replay an incident")
@@ -403,7 +531,7 @@ with st.sidebar:
         runs = [r for r in runs if chosen == "all" or r["scenario"] == chosen]
     picked = st.selectbox("Run", runs, format_func=lambda r: r["label"]) if runs else None
     st.divider()
-    st.caption("Live mode (inject a fault, approve fixes yourself) needs the service running: coming next.")
+    st.caption("To run a real incident and approve the fixes yourself, switch Mode to **Live** (top of the page).")
 
 incident, report_view, evaluation = st.tabs(["Incident", "Incident report", "Evaluation"])
 with evaluation:

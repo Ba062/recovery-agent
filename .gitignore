@@ -231,3 +231,5 @@ service/config.yaml.tmp
 # live test run records
 tests/live/output/
 
+# Live mode (dashboard): records + reports of live runs
+live_runs/
