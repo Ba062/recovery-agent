@@ -104,5 +104,39 @@ else:
           not at.exception and len(at.get("progress")) == 1 and bool(scrolling),
           at.exception[0].message if at.exception else f"progress {len(at.get('progress'))}, autoscroll {len(scrolling)}")
 
+# ---- a check_invariants result is shown green ONLY for the exact green answer (never for an error)
+APP_FILE = ROOT / "ui" / "app.py"
+CHECK_TEXTS = {
+    "error": "Tool error: service unreachable",
+    "broken": "Still broken:\n- [business] payment_gap: 3 of 9 orders were processed but have no payment.",
+    "green": "All business invariants green (health, payments, queue, worker, ledger, errors, latency).",
+}
+
+
+def render_check(text: str, app_file: Path = APP_FILE) -> AppTest:
+    """Run just show_result("check_invariants", text) from ui/app.py: its functions, not the page."""
+    script = (
+        "from pathlib import Path\n"
+        f"app = Path({str(app_file)!r})\n"
+        "source = app.read_text(encoding='utf-8')\n"
+        "marker = next(l for l in source.splitlines() if l.startswith('# ---') and l.endswith(' page'))\n"
+        "env = {'__file__': str(app), '__name__': 'app_functions'}\n"
+        "exec(compile(source.split(marker)[0], str(app), 'exec'), env)\n"
+        f"env['show_result']('check_invariants', {text!r})\n"
+    )
+    return AppTest.from_string(script, default_timeout=60).run()
+
+
+shown = {name: render_check(text) for name, text in CHECK_TEXTS.items()}
+check("check_invariants error: never green, shown as a warning with the raw text",
+      not shown["error"].exception and not shown["error"].success
+      and any("did not give a result" in w.value for w in shown["error"].warning)
+      and any("Tool error" in c.value for c in shown["error"].code))
+check("check_invariants still broken: red, with friendly labels",
+      not shown["broken"].success
+      and any("Payments missing: 3 of 9 orders unpaid" in e.value for e in shown["broken"].error))
+check("check_invariants green answer: green",
+      [s.value for s in shown["green"].success] == ["All business invariants green"])
+
 print(f"\n{passed}/{total} checks passed")
 sys.exit(0 if passed == total else 1)

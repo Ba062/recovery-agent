@@ -63,7 +63,9 @@ Nabd's answer:
 - watch **business invariants** (orders vs payments, enqueued vs processed, worker heartbeat, ledger vs orders);
 - let an LLM investigate only when one breaks;
 - let it fix things only with human approval;
-- check in code, never on the model's word, that the system has really recovered, or else escalate.
+- check in code, never on the model's word, that a "recovered" claim really holds, and escalate if it doesn't.
+  [Design decisions](#design-decisions-and-trade-offs) lists the other cases where code forces escalation, and the
+  ones it leaves to the model.
 
 ## How Nabd works
 
@@ -80,9 +82,11 @@ flowchart LR
     agent -- "read tools<br/>(run freely)" --> svc
     agent -- "write tools<br/>(fixed allow-list)" --> human{"Human:<br/>approve / reject"}
     human -- approved --> svc
-    agent --> verify["Verify in code:<br/>invariants green for ~15 s?"]
+    agent -- "claims recovered" --> verify["Verify in code:<br/>still green for ~15 s?"]
     verify -- "yes" --> report["Incident report<br/>English + Arabic"]
-    verify -- "no / unsure / rejected / same fix twice" --> esc["Escalate to a human<br/>with evidence"]
+    verify -- "no: claim overridden" --> esc["Escalate to a human<br/>with evidence"]
+    agent -- "forced in code: confidence below 0.6,<br/>same fix blocked, refusal, 12 steps" --> esc
+    agent -.->|"model's own call, prompt only:<br/>after a rejection, or not recovered"| esc
     report --> ui["ui/app.py<br/>Streamlit dashboard"]
     esc --> ui
 ```
@@ -230,7 +234,8 @@ The full plan, approved before any result existed, is in [`eval/PLAN.md`](eval/P
   - The code guards are evaluated offline, by grading the model's own final claim, and also live on relapse and unknown.
 - **False-alarm window:** 15 minutes of healthy traffic at normal and 4x load, with no fault.
 - **Grader check.** Before any paid run, the runbook (the oracle) had to pass every dev scenario its table covers, and
-  `relapse` had to be graded as not recovered. "Do nothing" (the null) could never count as recovered. Afterwards, every failed run was read by hand ([`eval/REVIEW.md`](eval/REVIEW.md)). The grader was
+  `relapse` had to be graded as not recovered. "Do nothing" (the null) could never count as recovered. Afterwards, every failed run was read by hand ([`eval/REVIEW.md`](eval/REVIEW.md)), against
+  its full record in [`eval/runs/`](eval/runs/) (every eval run's events, tool calls, ground-truth readings and verdict). The grader was
   not changed after the freeze; where reading a record disagrees with it, both numbers are reported.
 
 ## Results
@@ -351,15 +356,20 @@ the relapse.
    written to the deploy history as `nabd-agent`.
 4. **Safety rules enforced in code, not only asked for in the prompt:**
    - one fix per turn;
-   - the same fix at most twice;
+   - the same fix at most twice; a third attempt is blocked, and Nabd escalates if the system isn't recovered;
    - confidence below 0.6 escalates;
-   - a step limit of 12;
-   - a "recovered" claim must hold for ~15 s.
+   - a step limit of 12, after which Nabd escalates (a model refusal escalates too);
+   - a "recovered" claim must hold for ~15 s, or it's overridden and Nabd escalates.
+
+   **Not enforced in code:** escalating after a human rejects a fix, and escalating when Nabd itself reports the
+   system as not (yet) recovered. The prompt asks for both. The second is exactly how `bad_order_api_deploy` failed
+   (see [Limitations](#limitations)).
 
    The relapse results show why. The model itself claimed recovery in all 7 relapse runs: 3 before the fix and 4 on
    the frozen agent. The old 2 s check caught 2 of the first 3, and the 15 s check caught all 4.
 5. **Money and figures computed by code.** SAR exposure and recovered amounts come from the database. The model's
-   report prose is rejected if it contains any digit, so it can't invent a number.
+   report prose is rejected if it contains any digit, so it can't invent a number, and it is HTML-escaped
+   when rendered, so it can't inject markup into the dashboard.
 6. **A hand-written loop, no agent framework.** `agent.py` is about 630 lines that can be read and explained line by
    line. The model is Claude Sonnet 5.5 at `medium` effort, with adaptive thinking (summaries shown in the dashboard),
    prompt caching, and a server-side refusal fallback. If the safety classifier wrongly declines, the API retries on a
@@ -390,6 +400,13 @@ These are specific, and come from reading every failed run ([`eval/REVIEW.md`](e
   explicitly called "unrelated" (34/36 after reading, versus 33/36 automated).
 - **A grading gap on lost orders.** A full service restart is graded as passing `worker_hang` but lost 26 queued orders.
   The grader checks unpaid and corrupted orders, not orders left queued forever.
+- **Two silent failures the monitor can't see** (no scenario tests them):
+  - **A stalled ledger sync.** The service reports `sync_last_run_age_s`, but no monitor rule reads it. The ledger rule
+    only compares ledger rows that exist, so if the sync job stopped, paid orders would silently stop reaching the
+    ledger.
+  - **Orders stuck in `queued`** after a job fails. They are counted in the money figures, but no rule fires on them.
+  - Both would need new monitor rules (`monitor.py` is frozen), for example on sync age, and on queued orders older
+    than a few seconds while the worker is heartbeating.
 - **A fixed runbook is close on held-out.**
   - **By scenario:** Nabd recovers 3 of the 4 fixable held-out scenarios, and the runbook 2 of 4.
   - **The one difference is `payment_deploy_bug`:** Nabd 5/5, the runbook 0/3, because its table re-sets the URL

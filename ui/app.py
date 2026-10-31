@@ -205,11 +205,15 @@ def show_result(tool: str, text: str) -> None:
                 st.caption(f"Money recovered: {money['count']} = {money['total_sar']:,.2f} SAR")
             return
     if tool == "check_invariants":
+        # Green ONLY for the exact green answer: an error or an unreadable result must never look green.
         found = anomalies(text)
-        if not found:
+        if text.startswith("All business invariants green"):
             st.success("All business invariants green")
-        else:
+        elif found:
             st.error("Still broken:\n" + "\n".join(f"- {friendly(r, m)}" for r, m in found))
+        else:
+            st.warning("The check did not give a result (shown as returned):")
+            st.code(text[:700], language=None, wrap_lines=True)
         return
     if tool == "read_logs" and "Most recent" in text:
         summary, _, recent = text.partition("Most recent")

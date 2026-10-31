@@ -259,6 +259,30 @@ checks["escalated run: outcome escalated, no peak row, no actions, no config cha
     and report.LABELS[lang]["no_actions"] in versions[lang] and report.LABELS[lang]["config"] not in versions[lang]
     for lang in ("en", "ar"))
 
+# ---- 6. model prose can't inject HTML; follow-ups packed as <item> tags or a CDATA list become a clean list
+evil = {lang: dict(GOOD[lang]) for lang in GOOD}
+evil["en"]["evidence_note"] = 'Provider calls failed <script>alert("x")</script> & <b>quietly</b>.'
+evil["ar"]["evidence_note"] = "فشلت الطلبات <img src=x onerror=alert(this)> بصمت."
+versions = report.build(RECORD, evil)
+checks["model prose with HTML is escaped, never rendered (script, b, img)"] = (
+    "<script>" not in versions["en"] and "&lt;script&gt;" in versions["en"] and "<b>" not in versions["en"]
+    and "&amp;" in versions["en"] and "<img" not in versions["ar"] and "&lt;img" in versions["ar"])
+checks["the code's own HTML is kept: rtl div and ltr spans in Arabic"] = (
+    versions["ar"].startswith('<div dir="rtl">') and '<span dir="ltr">' in versions["ar"])
+packed = {**GOOD, "en": {**GOOD["en"], "follow_ups": "<item>Audit config edits.</item><item>Alert on failures.</item>"}}
+checks["follow-ups sent as <item> tags -> clean list"] = (
+    report.unflatten(report.flatten(packed))["en"]["follow_ups"] == ["Audit config edits.", "Alert on failures."])
+cdata = {**GOOD, "en": {**GOOD["en"], "follow_ups": ['<![CDATA[["Investigate the stall.","Alert on heartbeat age."]]]>']}}
+checks["follow-ups sent as a JSON list inside CDATA -> clean list"] = (
+    report.unflatten(report.flatten(cdata))["en"]["follow_ups"] == ["Investigate the stall.", "Alert on heartbeat age."])
+stored = {**GOOD, "en": {**GOOD["en"], "follow_ups": ["<item>Audit config edits.</item><item>Alert on failures.</item>"]}}
+text = report.build(RECORD, stored)["en"]
+checks["stored prose with <item> tags renders as separate bullets, no tags"] = (
+    "- Audit config edits." in text and "- Alert on failures." in text and "item>" not in text)
+checks["normal follow-ups and one-bullet-string follow-ups unchanged"] = (
+    report.unflatten(report.flatten(GOOD))["ar"]["follow_ups"] == GOOD["ar"]["follow_ups"]
+    and report.as_items("- one\n- two") == ["one", "two"])
+
 for name, ok in checks.items():
     print(("PASS " if ok else "FAIL ") + name)
 print(f"{sum(bool(v) for v in checks.values())}/{len(checks)} passed")

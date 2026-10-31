@@ -164,7 +164,7 @@ it is noted here, and both numbers are reported.
   even warned "don't restart the worker until payments work". But it listed only the payment URL as a root cause, not
   the stuck worker (1/2 causes).
 
-### Ablations (dev, frozen agent): read on Sat 31 Oct
+### Ablations (dev, frozen agent): read on Fri 30 Oct (evening)
 
 - **A3 live, code guards off (relapse and unknown, N=3): 3/6.**
   - **relapse 0/3:** all three are real failures. In each run the model restarted the worker once, its own 2 s check

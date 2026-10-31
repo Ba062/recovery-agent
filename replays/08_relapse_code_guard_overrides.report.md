@@ -46,7 +46,10 @@ No orders were left unpaid and none had ledger problems. At the end, 27 orders w
 
 ## Follow-ups
 
-- <![CDATA[["Investigate why the worker entered the wait state and did not resume.","Alert on worker heartbeat age, since /health stayed green during the stall.","Alert when the queue keeps growing while the processed count is flat.","Re-check the queue after any restart before marking an incident as recovered."]]]>
+- Investigate why the worker entered the wait state and did not resume.
+- Alert on worker heartbeat age, since /health stayed green during the stall.
+- Alert when the queue keeps growing while the processed count is flat.
+- Re-check the queue after any restart before marking an incident as recovered.
 
 ---
 

@@ -291,7 +291,7 @@ No difference is claimed when the intervals overlap. Traffic is seeded by rep nu
 same order stream in rep k (a paired comparison).
 
 Every run's full record (events, tool calls, thinking summaries, ground-truth readings, verdict with
-reasons) goes to `eval/runs/` (git-ignored). Incident reports are not generated during the eval: they
+reasons) goes to `eval/runs/` (committed after the eval, so the manual review can be checked). Incident reports are not generated during the eval: they
 don't affect grading, and skipping them saves ~$0.02 per run.
 
 ## 9. Files and commands

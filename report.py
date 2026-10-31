@@ -8,6 +8,7 @@ can never reach the report. If the prose still fails, the report has the code-bu
 Usage:  report.save(record, Path("replays/run1"))  ->  replays/run1.report.md
 """
 
+import html
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -220,7 +221,7 @@ def render(record: dict, prose: dict | None, lang: str) -> str:
     p = prose[lang] if prose else None
 
     def section(key: str) -> list[str]:
-        return [fill(p[key], f, lang) if p else L["no_prose"], ""]
+        return [fill(plain(p[key]), f, lang) if p else L["no_prose"], ""]
 
     def count(name: str) -> str:
         """A count in a table: with its noun in Arabic ("38 طلبًا"), bare in English (the header says what)."""
@@ -256,7 +257,7 @@ def render(record: dict, prose: dict | None, lang: str) -> str:
                 f"| {L['recovered_paid']} | {count('recovered_paid_count')} ({f['recovered_paid_sar']} {cur}) |",
                 f"| {L['recovered_ledger']} | {count('recovered_ledger_count')} ({f['recovered_ledger_sar']} {cur}) |"]
     out += ["", *section("impact_note"), f"## {L['follow_ups']}", ""]
-    out += [f"- {fill(item, f, lang)}" for item in p["follow_ups"]] if p else [L["no_prose"]]
+    out += [f"- {fill(plain(item), f, lang)}" for item in as_items(p["follow_ups"])] if p else [L["no_prose"]]
     out += ["", "---", "", f"_{L['footer'].format(rate=f['usd_to_sar'])}_"]
     text = "\n".join(out)
     # Blank lines around the div so Markdown inside it still renders (GitHub, VS Code).
@@ -276,13 +277,58 @@ PROSE_TOOL = {"name": "write_report_prose",
                                "required": [f"{lang}_{k}" for lang in ("en", "ar") for k in FIELDS]}}
 
 
+def plain(text: str) -> str:
+    """Model prose is plain text. Escape <, > and & so it can never become HTML: the dashboard renders the
+    report with HTML allowed (for the code's own rtl/ltr tags), so a tag written by the model would be live."""
+    return html.escape(text, quote=False)
+
+
+ITEM_TAG = re.compile(r"<item>(.*?)</item>", re.S)
+CDATA = re.compile(r"<!\[CDATA\[(.*)\]\]>", re.S)
+
+
+def split_items(text: str) -> list[str] | None:
+    """Several follow-ups packed into one string, in formats the model has really sent:
+    <item>...</item><item>...</item>, or a JSON list (possibly inside <![CDATA[...]]>). None = one plain item."""
+    text = text.strip()
+    wrapped = CDATA.fullmatch(text)
+    if wrapped:
+        text = wrapped.group(1).strip()
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(x).strip() for x in parsed if str(x).strip()]
+    tagged = ITEM_TAG.findall(text)
+    if tagged:
+        return [t.strip() for t in tagged if t.strip()]
+    return [text] if wrapped else None
+
+
+def as_items(follow_ups):
+    """Follow-ups as a clean list of strings. Anything else is returned as it is, for problems_in to reject."""
+    if isinstance(follow_ups, str):
+        split = split_items(follow_ups)
+        if split is not None:
+            return split
+        lines = [line.strip().lstrip("-•*").strip() for line in follow_ups.splitlines()]  # one bullet string
+        return [line for line in lines if line]
+    if not isinstance(follow_ups, list):
+        return follow_ups
+    items = []
+    for item in follow_ups:
+        split = split_items(item) if isinstance(item, str) else None
+        items += split if split is not None else [item]
+    return items
+
+
 def unflatten(tool_input: dict) -> dict:
     """{"en_root_cause": ...} -> {"en": {"root_cause": ...}, "ar": {...}}"""
     prose = {lang: {k: tool_input.get(f"{lang}_{k}") for k in FIELDS} for lang in ("en", "ar")}
     for part in prose.values():
-        if isinstance(part["follow_ups"], str):  # the model sometimes sends the list as one bullet string
-            lines = [line.strip().lstrip("-•*").strip() for line in part["follow_ups"].splitlines()]
-            part["follow_ups"] = [line for line in lines if line]
+        part["follow_ups"] = as_items(part["follow_ups"])
     return prose
 
 

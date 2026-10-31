@@ -49,7 +49,10 @@ At peak, 20 orders were unpaid, worth 14,346.75 SAR, and 34 orders were queued, 
 
 ## Follow-ups
 
-- <item>Keep an audit trail and require review for config edits such as payment_provider_url.</item><item>Alert on payment provider failures, which are currently logged only at DEBUG.</item><item>Confirm with ops that the new endpoint is reachable before retrying the migration.</item><item>Investigate why the worker enters a wait state when the provider fails, and add a test for it.</item>
+- Keep an audit trail and require review for config edits such as payment_provider_url.
+- Alert on payment provider failures, which are currently logged only at DEBUG.
+- Confirm with ops that the new endpoint is reachable before retrying the migration.
+- Investigate why the worker enters a wait state when the provider fails, and add a test for it.
 
 ---
 
@@ -110,7 +113,10 @@ _All figures are inserted by code from the run record (USD converted at the peg 
 
 ## إجراءات المتابعة
 
-- <item>الاحتفاظ بسجل تدقيق لتعديلات الإعدادات مثل payment_provider_url واشتراط مراجعتها.</item><item>إضافة تنبيه على إخفاقات مزود الدفع التي تُسجَّل حاليًا بمستوى DEBUG فقط.</item><item>التأكد مع فريق العمليات من إمكانية الوصول إلى العنوان الجديد قبل إعادة محاولة الترحيل.</item><item>فحص سبب دخول العامل في حالة انتظار عند إخفاق المزود، وإضافة اختبار لذلك.</item>
+- الاحتفاظ بسجل تدقيق لتعديلات الإعدادات مثل payment_provider_url واشتراط مراجعتها.
+- إضافة تنبيه على إخفاقات مزود الدفع التي تُسجَّل حاليًا بمستوى DEBUG فقط.
+- التأكد مع فريق العمليات من إمكانية الوصول إلى العنوان الجديد قبل إعادة محاولة الترحيل.
+- فحص سبب دخول العامل في حالة انتظار عند إخفاق المزود، وإضافة اختبار لذلك.
 
 ---
 
