@@ -209,15 +209,23 @@ def recent_changes() -> str:
 
 # ---------------------------------------------------------------- tools (write: need approval)
 SETTABLE_KEYS = {"payment_provider_url", "queue_max", "worker_count", "sync_interval_s"}
+# v2 (review F7): URLs are allow-listed by value too, so Nabd can't point payments at a guessed endpoint.
+# Known-good = the URL in the committed config template.
+CONFIG_TEMPLATE = ROOT / "service" / "config.default.yaml"
+KNOWN_GOOD_URLS = {yaml.safe_load(CONFIG_TEMPLATE.read_text(encoding="utf-8"))["payment_provider_url"]}
 
 
 def set_config(key: str, value: str) -> str:
     if key not in SETTABLE_KEYS:
         raise ValueError(f"key {key!r} can't be set. Allowed: {sorted(SETTABLE_KEYS)}. "
                          f"To change the version, use rollback_deploy.")
+    new = yaml.safe_load(value)  # "1000" -> int, "internal://x" stays a string
+    if key == "payment_provider_url" and new not in KNOWN_GOOD_URLS:
+        raise ValueError(f"{new!r} is not a known-good provider URL. Allowed: {sorted(KNOWN_GOOD_URLS)}. "
+                         f"If the provider itself is down, escalate.")
     cfg = _read_config()
     old = cfg.get(key)
-    cfg[key] = yaml.safe_load(value)  # "1000" -> int, "internal://x" stays a string
+    cfg[key] = new
     write_config(cfg)                 # validates + atomic write; raises ValueError if invalid
     _record_change(f"config: {key} {old} -> {cfg[key]}")
     return f"{key}: {old!r} -> {cfg[key]!r}. " + _wait_until_applied(key, cfg[key])
@@ -293,6 +301,7 @@ READ_TOOLS = [
 ]
 WRITE_TOOL_SCHEMAS = [
     _tool("set_config", f"[WRITE - needs human approval] Set one config key: {sorted(SETTABLE_KEYS)}. "
+          f"payment_provider_url accepts only known-good URLs: {sorted(KNOWN_GOOD_URLS)}. "
           "No restart needed: returns once the service confirms it is using the new value.",
           {"key": {"type": "string", "enum": sorted(SETTABLE_KEYS)}, "value": {"type": "string"}}, ["key", "value"]),
     _tool("rollback_deploy", "[WRITE - needs human approval] Roll back the service VERSION to the previously "
@@ -369,6 +378,8 @@ def enforce_escalation(diagnosis: Diagnosis, repeated_fix_blocked: bool = False)
     - low confidence always escalates
     - the same fix failed twice (and was blocked a third time) and the system is not
       verified as recovered -> escalate, never give up silently (official example 5)
+    - any other run that ends not recovered and not escalated -> escalate (v2, review F1):
+      nobody is left holding a broken system
     Call this AFTER verify_recovery_claim, so "recovered" can't be faked to dodge the rule.
     """
     if diagnosis.confidence < MIN_CONFIDENCE:
@@ -376,6 +387,9 @@ def enforce_escalation(diagnosis: Diagnosis, repeated_fix_blocked: bool = False)
     if repeated_fix_blocked and not diagnosis.recovered and not diagnosis.escalate:
         diagnosis.escalate = True
         diagnosis.summary += " [Nabd: the same fix failed twice without recovery - escalating to a human.]"
+    if not diagnosis.recovered and not diagnosis.escalate:
+        diagnosis.escalate = True
+        diagnosis.summary += " [Nabd: recovery is not verified - escalating to a human.]"
     return diagnosis
 
 
