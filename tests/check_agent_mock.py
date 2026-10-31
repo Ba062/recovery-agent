@@ -250,6 +250,31 @@ readings[:] = [None, None]
 d, rec, sent = run([reply("refusal")])
 checks["service unreachable -> money marked unavailable, no crash (also on give-up path)"] = (
     d.money_impact_before is None and "unavailable" in d.impact)
+agent.fetch_money_impact = lambda: None
+
+# ---- v2, review F1: a run that ends not recovered and not escalated is escalated in code
+gave_up = dict(good, confidence=0.9, recovered=False, escalate=False)
+d, rec, sent = run([reply("tool_use", tool("submit_diagnosis", gave_up, 1))])
+checks["v2 F1: not recovered + not escalated (confidence 0.9) -> escalate forced, summary says why"] = (
+    not d.recovered and d.escalate and "recovery is not verified" in d.summary)
+d, rec, sent = run([reply("tool_use", tool("submit_diagnosis", honest, 1))])
+checks["v2 F1: a verified recovery is NOT escalated"] = d.recovered and not d.escalate
+d, rec, sent = run([reply("tool_use", tool("submit_diagnosis", dict(gave_up, escalate=True), 1))])
+checks["v2 F1: the model's own escalation is kept, no extra note"] = (
+    d.escalate and "recovery is not verified" not in d.summary)
+
+# ---- v2, review F7: payment_provider_url accepts only known-good values (the real set_config, not the fake)
+checks["v2 F7: known-good URLs = the config template's URL"] = agent.KNOWN_GOOD_URLS == {"internal://payments-v1"}
+try:
+    agent.set_config("payment_provider_url", "internal://payments-v2")  # raises before touching config.yaml
+    refused = ""
+except ValueError as e:
+    refused = str(e)
+checks["v2 F7: a guessed provider URL is refused before anything is written"] = (
+    "not a known-good provider URL" in refused and "internal://payments-v1" in refused)
+schema = next(t for t in agent.WRITE_TOOL_SCHEMAS if t["name"] == "set_config")
+checks["v2 F7: the set_config tool description lists the known-good URL"] = (
+    "internal://payments-v1" in schema["description"])
 
 for name, ok in checks.items():
     print(("PASS " if ok else "FAIL ") + name)

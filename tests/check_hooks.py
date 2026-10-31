@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 import chaos       # noqa: E402
 import supervisor  # noqa: E402
 from service.jsonlog import LOG_FILE  # noqa: E402
+from service import app as svc  # noqa: E402  (only its metrics code; the real service runs separately)
 
 URL = chaos.SERVICE_URL
 passed = total = 0
@@ -59,9 +60,36 @@ check("v1.5: POST /orders returns 500", codes == [500, 500, 500], str(codes))
 errors = logs("order validation failed")
 check("v1.5: exception logged at ERROR", errors and all(r["level"] == "ERROR" for r in errors), str(errors[:1]))
 check("v1.5: no order was created", business()["orders_created"] == 0)
+for _ in range(30):  # 33 failed requests: a 500-request window would need ~630 good ones to drop under 5%
+    order()
 chaos.set_config("version", "v1.3")
 wait_reload("version", "v1.3")
 check("v1.5 -> v1.3: orders work again", order().status_code == 200)
+
+# v2, review F2: the error rate covers the last 30 s, not the last 500 requests, so it clears after a fix
+def error_rate() -> float:
+    return requests.get(f"{URL}/metrics", timeout=3).json()["error_rate"]
+
+
+check("v2 F2: right after the rollback the old 500s still count", error_rate() > 0.05, str(error_rate()))
+deadline = time.time() + svc.METRICS_WINDOW_S + 5
+while time.time() < deadline and error_rate() > 0.05:
+    order()
+    time.sleep(0.5)
+check(f"v2 F2: error rate back under 5% within {svc.METRICS_WINDOW_S}+5 s (a 500-request window needs ~100 s)",
+      error_rate() <= 0.05, str(error_rate()))
+
+# v2, review F2, without the service: requests older than the window don't count
+now = time.monotonic()
+svc.recent_requests.clear()
+svc.recent_requests.extend([(now - 40, 5.0, 500)] * 450 + [(now - 5, 5.0, 200)] * 10)
+check("v2 F2: 450 old 500s + 10 recent 200s -> error rate 0", svc.metrics()["error_rate"] == 0.0,
+      str(svc.metrics()))
+svc.recent_requests.extend([(now - 1, 5.0, 500)] * 10)
+check("v2 F2: 10 recent 500s of 20 recent requests -> error rate 0.5", svc.metrics()["error_rate"] == 0.5,
+      str(svc.metrics()))
+svc.recent_requests.clear()
+check("v2 F2: no requests -> error rate 0", svc.metrics()["error_rate"] == 0.0)
 
 # v1.6: the payment step fails silently (DEBUG), the order is processed unpaid; reprocess fails until rollback
 chaos.reset()

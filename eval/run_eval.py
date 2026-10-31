@@ -85,8 +85,9 @@ def code_version() -> str:
     return hashlib.sha256(json.dumps(file_hashes(), sort_keys=True).encode()).hexdigest()[:12]
 
 
-def changed_since_freeze(frozen_path: Path = FROZEN) -> list[str] | None:
+def changed_since_freeze(frozen_path: Path | None = None) -> list[str] | None:
     """Frozen files that differ from the freeze. None if there is no freeze yet."""
+    frozen_path = frozen_path or FROZEN
     if not frozen_path.exists():
         return None
     frozen = json.loads(frozen_path.read_text(encoding="utf-8"))["files"]
@@ -114,7 +115,7 @@ def freeze(tag: str) -> None:
         print(f"Agent files + fingerprint identical: {data['agent_unchanged']}")
     FROZEN.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     print(f"Frozen as {tag}: code_version {data['code_version']}, fingerprint {data['fingerprint']}.")
-    print(f"Now: git add eval/FROZEN.json; git commit -m \"Freeze ({tag})\"; git tag {tag}")
+    print(f"Now: git add {FROZEN}; git commit -m \"Freeze ({tag})\"; git tag {tag}")
 
 
 # ---------------------------------------------------------------- results files
@@ -273,7 +274,7 @@ def run_matrix(sets: list[str], arm_names: list[str], variants: list[str], reps:
     if "heldout" in sets:
         changed = changed_since_freeze()
         if changed is None:
-            raise SystemExit("No eval/FROZEN.json: freeze the agent before running held-out scenarios.")
+            raise SystemExit(f"No {FROZEN.name}: freeze the agent before running held-out scenarios.")
         if changed:
             raise SystemExit(f"Frozen files changed since the freeze: {changed}. Held-out runs refused.")
 
@@ -414,8 +415,11 @@ if __name__ == "__main__":
     parser.add_argument("--out", type=Path, default=RESULTS)
     parser.add_argument("--minutes", type=float, default=10, help="falsealarm: minutes at normal load")
     parser.add_argument("--tag", default="nabd-frozen-v1", help="freeze: the git tag this freeze will get")
+    parser.add_argument("--frozen", type=Path, default=FROZEN,
+                        help="freeze file to write/check (v2 uses eval/FROZEN_V2.json, so FROZEN.json stays v1.1's)")
     args = parser.parse_args()
 
+    FROZEN = args.frozen.resolve()
     if args.command == "freeze":
         freeze(args.tag)
         sys.exit(0)
