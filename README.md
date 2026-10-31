@@ -8,6 +8,10 @@
 > - **Recovery:** a Claude agent finds the cause and applies one human-approved fix at a time; code verifies the result. Dev 32/32, held-out 19/25, about $0.03 per incident.
 > - **Safety:** fixed tool allow-list, no shell; code forces an escalation on low confidence, a repeated failed fix or the step limit.
 
+**Version:** the headline results are for the frozen agent `nabd-frozen-v1.1`. `main` now runs v2, evaluated separately
+in [`eval/V2.md`](eval/V2.md); the held-out scenarios are not unseen for v2, so its numbers are an iteration, not a
+generalisation result.
+
 **Nabd diagnoses failing systems from logs and metrics and safely brings them back online, with a human in the loop.**
 Health checks say everything is fine. Nabd checks whether the business is actually working.
 
@@ -98,8 +102,8 @@ flowchart LR
     agent -- "claims recovered" --> verify["Verify in code:<br/>still green for ~15 s?"]
     verify -- "yes" --> report["Incident report<br/>English + Arabic"]
     verify -- "no: claim overridden" --> esc["Escalate to a human<br/>with evidence"]
-    agent -- "forced in code: confidence below 0.6 (60%),<br/>same fix blocked, refusal, 12 steps" --> esc
-    agent -.->|"model's own call, prompt only:<br/>after a rejection, or not recovered"| esc
+    agent -- "forced in code: confidence below 0.6 (60%),<br/>same fix blocked, refusal, 12 steps;<br/>v2: run ends unresolved (F1)" --> esc
+    agent -.->|"model's own call, prompt only:<br/>after a rejection (v1.1: also when not recovered)"| esc
     report --> ui["ui/app.py<br/>Streamlit dashboard"]
     esc --> ui
 ```
@@ -361,11 +365,29 @@ the relapse.
 | `06e24115b472` | 23/24 | First dev round, before the fix: `relapse` rep 2 was a false recovery claim |
 | `3edb406d0160` (= `nabd-frozen-v1`) | 24/24 | `agent.py`: a recovery claim must hold for ~15 s, checked in code |
 | `6af255f330af` (= `nabd-frozen-v1.1`) | 8/8 | Only `service/app.py` and `service/pipeline.py` (held-out fault hooks); `agent.py` byte-identical |
+| `98e2340053d1` (= `nabd-v2`, after the held-out results) | 8/8 (N=1) | `agent.py`: forced escalation when a run ends unresolved (F1), allow-listed provider URL (F7); `service/app.py`: 30 s error-rate window (F2) |
+| `7bceaa36b5bc` (= `nabd-v2.1`) | - | Only `service/app.py` (a fault hook for a new pre-registered scenario); `agent.py` byte-identical to `nabd-v2` |
+
+**v1.1 vs v2 on the same 25 held-out runs** (N=5 per scenario, same frozen grader; from `eval/results.csv` and
+`eval/results_v2.csv`). v2 was built after seeing these scenarios, so this shows what the changes did, not how v2
+generalises:
+
+| How the run ended | v1.1 | v2 |
+|---|---|---|
+| Repaired and verified | 15 | 15 |
+| Correctly escalated (`provider_outage`) | 4 | 5 |
+| Escalated after an unsafe action | 1 | 0 |
+| Fixed, not verified, escalated (`bad_order_api_deploy`) | 0 | 5 |
+| Fixed, not verified, **not** escalated (`bad_order_api_deploy`) | 5 | 0 |
+| **Passed (automated)** | **19/25** | **15/25** |
+
+v2's lower automated score is all `provider_outage` (0/5): every run named the outage and escalated, but wrote "times
+out", which the frozen keyword list doesn't contain. After reading, v2 is 20/25. Details in [`eval/V2.md`](eval/V2.md).
 
 **What these hashes are:**
 - A **code version** is a hash of *every* frozen file (agent, monitor, service, eval grader), so it changes when any of
   them changes.
-- The **agent fingerprint** (`365928b5883c`, the same for all three) covers only the prompt, the tool definitions, the
+- The **agent fingerprint** (`365928b5883c`, the same for the first three; `0a01b7ed94b0` for both v2 versions) covers only the prompt, the tool definitions, the
   guard function names and the model settings. It doesn't cover the code inside functions, which is why it didn't change
   with the relapse fix.
 - What shows the agent is identical between v1 and v1.1 is the per-file SHA-256 in `eval/FROZEN.json` (and the
@@ -392,9 +414,12 @@ the relapse.
    - a step limit of 12, after which Nabd escalates (a model refusal escalates too);
    - a "recovered" claim must hold for ~15 s, or it's overridden and Nabd escalates.
 
-   **Not enforced in code:** escalating after a human rejects a fix, and escalating when Nabd itself reports the
-   system as not (yet) recovered. The prompt asks for both. The second is exactly how `bad_order_api_deploy` failed
-   (see [Limitations](#limitations)).
+   **Not enforced in code in v1.1** (the evaluated version): escalating after a human rejects a fix, and escalating
+   when Nabd itself reports the system as not (yet) recovered. The prompt asks for both. The second is exactly how
+   `bad_order_api_deploy` failed (see [Limitations](#limitations)).
+
+   **v2 (F1):** a run that ends neither recovered nor escalated is now escalated in code. On v2's held-out runs, no run
+   ended unresolved and without a hand-off (v1.1: 5). Escalating after a rejection is still prompt-only.
 
    The relapse results show why. The model itself claimed recovery in all 7 relapse runs: 3 before the fix and 4 on
    the frozen agent. The old 2 s check caught 2 of the first 3, and the 15 s check caught all 4.
@@ -421,9 +446,15 @@ These are specific, and come from reading every failed run ([`eval/REVIEW.md`](e
     Neither Nabd's checks nor the 15 s grader window saw green. And Nabd set neither "recovered" nor "escalate", so a
     fixed-but-unverified incident ended without a hand-off.
   - **Two lessons:** verification is only as good as the metric's time window, and "unverified" should always mean
-    escalate. Both are left as found; the agent was frozen.
+    escalate. Both are left as found in the frozen agent.
+  - **In v2, only partly addressed (F2 + F1):** the error rate now covers the last 30 s instead of the last 500
+    requests, so it clears about 30 s after the rollback. That is still longer than the 15 s hold, so these runs still
+    can't be verified as recovered: v2 escalates them instead (5/5, forced by F1) and still scores 0/5 on this
+    scenario. See [`eval/V2.md`](eval/V2.md).
 - **One unsafe experiment under pressure** (`provider_outage` rep 3). During a provider outage, Nabd tried a guessed
   URL "to test". That failed, so it reverted the URL and escalated. The other 4 runs changed nothing.
+  - **In v2 (F7):** `set_config` accepts only the known-good provider URL, so a guessed URL is refused in code. v2's
+    held-out runs had 0 unsafe actions (v1.1: 1).
 - **Names only the payment cause in `compound`** (3 runs: 2 robustness runs where the first fix was rejected, and 1
   minimal-prompt ablation run). Nabd acted safely in all three, and the ablation run even recovered fully. But its root
   cause named only the payment URL, not the stuck worker.

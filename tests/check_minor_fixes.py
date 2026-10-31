@@ -1,6 +1,7 @@
 """Regression checks for the medium/minor step 1-2 fixes (B, C, G, H, I).
 Starts and resets the service on port 8000. Run from the project root:  python tests/check_minor_fixes.py
 """
+import os
 import sqlite3
 import subprocess
 import sys
@@ -133,8 +134,12 @@ sh("chaos.py", "reset")
 holder = sqlite3.connect(DB)
 holder.execute("SELECT 1").fetchone()
 code, out = sh("chaos.py", "reset")
-check("reset reports the locked DB clearly (exit 1, no traceback)",
-      code != 0 and "open in another program" in out and "Traceback" not in out, out.splitlines()[-1])
+if os.name == "nt":  # Windows refuses to delete an open file, so reset must say so
+    check("reset reports the locked DB clearly (exit 1, no traceback)",
+          code != 0 and "open in another program" in out and "Traceback" not in out, out.splitlines()[-1])
+else:  # Linux/macOS delete an open file without complaint, so there is nothing to report
+    check("reset works even with the DB open (not Windows: open files can be deleted)",
+          code == 0 and "DB and logs wiped" in out and "Traceback" not in out, out.splitlines()[-1])
 check("...and the service is NOT left stopped", sh("supervisor.py", "status")[1].startswith("running"))
 holder.close()
 code, out = sh("chaos.py", "reset")
